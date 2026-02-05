@@ -5,15 +5,15 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
-import { useEntity } from '@/lib/electric/hooks';
-import { WORKSPACE_ENTITY, type Workspace } from 'shared/remote-types';
+import { useShape } from '@/lib/electric/hooks';
+import { USER_WORKSPACES_SHAPE, type Workspace } from 'shared/remote-types';
 import type { SyncError } from '@/lib/electric/types';
 import { useAuth } from '@/hooks/auth/useAuth';
 
 /**
  * UserContext provides user-scoped data.
  *
- * Entities synced at user scope:
+ * Shapes synced at user scope:
  * - Workspaces (data only, scoped by owner_user_id)
  */
 export interface UserContextValue {
@@ -42,8 +42,8 @@ export function UserProvider({ children }: UserProviderProps) {
   const params = useMemo(() => ({}), []);
   const enabled = isSignedIn;
 
-  // Entity subscriptions
-  const workspacesResult = useEntity(WORKSPACE_ENTITY, params, { enabled });
+  // Shape subscriptions
+  const workspacesResult = useShape(USER_WORKSPACES_SHAPE, params, { enabled });
 
   // Lookup helpers
   const getWorkspacesForIssue = useCallback(

@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PlusIcon } from '@phosphor-icons/react';
 import { useProjectContext } from '@/contexts/remote/ProjectContext';
+import { useAuth } from '@/hooks/auth/useAuth';
 import { useOrgContext } from '@/contexts/remote/OrgContext';
-import { useUserContext } from '@/contexts/remote/UserContext';
 import { useActions } from '@/contexts/ActionsContext';
 import { attemptsApi } from '@/lib/api';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
@@ -18,7 +18,7 @@ interface IssueWorkspacesSectionContainerProps {
 
 /**
  * Container component for the workspaces section.
- * Fetches workspace data from UserContext and transforms it for display.
+ * Fetches workspace data from ProjectContext and transforms it for display.
  */
 export function IssueWorkspacesSectionContainer({
   issueId,
@@ -27,10 +27,14 @@ export function IssueWorkspacesSectionContainer({
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { openWorkspaceSelection } = useActions();
+  const { userId } = useAuth();
 
-  const { pullRequests, isLoading: projectLoading } = useProjectContext();
+  const {
+    pullRequests,
+    getWorkspacesForIssue,
+    isLoading: projectLoading,
+  } = useProjectContext();
   const { membersWithProfilesById, isLoading: orgLoading } = useOrgContext();
-  const { getWorkspacesForIssue, isLoading: userLoading } = useUserContext();
 
   // Get workspaces for the issue, with PR info
   const workspacesWithStats: WorkspaceWithStats[] = useMemo(() => {
@@ -60,11 +64,18 @@ export function IssueWorkspacesSectionContainer({
         prs: linkedPrs,
         owner,
         updatedAt: workspace.updated_at,
+        isOwnedByCurrentUser: workspace.owner_user_id === userId,
       };
     });
-  }, [issueId, getWorkspacesForIssue, pullRequests, membersWithProfilesById]);
+  }, [
+    issueId,
+    getWorkspacesForIssue,
+    pullRequests,
+    membersWithProfilesById,
+    userId,
+  ]);
 
-  const isLoading = projectLoading || orgLoading || userLoading;
+  const isLoading = projectLoading || orgLoading;
 
   // Handle clicking '+' to link a workspace
   const handleAddWorkspace = useCallback(() => {
