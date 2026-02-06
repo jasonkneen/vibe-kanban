@@ -8,6 +8,7 @@ import type {
   Tag,
   PullRequestStatus,
 } from 'shared/remote-types';
+import type { OrganizationMemberWithProfile } from 'shared/types';
 import { IssuePropertyRow } from '@/components/ui-new/views/IssuePropertyRow';
 import { IssueTagsRow } from '@/components/ui-new/views/IssueTagsRow';
 import { PrimaryButton } from '@/components/ui-new/primitives/PrimaryButton';
@@ -54,6 +55,7 @@ export interface KanbanIssuePanelProps {
 
   // Edit mode data
   issueId?: string | null;
+  creatorUser?: OrganizationMemberWithProfile | null;
   parentIssue?: { id: string; simpleId: string } | null;
   onParentIssueClick?: () => void;
   linkedPrs?: LinkedPullRequest[];
@@ -91,6 +93,7 @@ export function KanbanIssuePanel({
   statuses,
   tags,
   issueId,
+  creatorUser,
   parentIssue,
   onParentIssueClick,
   linkedPrs = [],
@@ -105,6 +108,9 @@ export function KanbanIssuePanel({
   onMoreActions,
 }: KanbanIssuePanelProps) {
   const isCreateMode = mode === 'create';
+  const creatorName =
+    creatorUser?.first_name?.trim() || creatorUser?.username?.trim() || null;
+  const showCreator = !isCreateMode && Boolean(creatorName);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -170,6 +176,7 @@ export function KanbanIssuePanel({
             priority={formData.priority}
             assigneeIds={formData.assigneeIds}
             statuses={statuses}
+            creatorUser={showCreator ? creatorUser : undefined}
             parentIssue={parentIssue}
             onParentIssueClick={onParentIssueClick}
             onStatusClick={() => onFormChange('statusId', formData.statusId)}
