@@ -21,6 +21,7 @@ import {
 } from '@/components/ui-new/actions';
 import { getActionLabel } from '@/components/ui-new/actions/useActionVisibility';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
+import { UserContext } from '@/contexts/remote/UserContext';
 import { useDevServer } from '@/hooks/useDevServer';
 import { useLogsPanel } from '@/contexts/LogsPanelContext';
 import { useLogStream } from '@/hooks/useLogStream';
@@ -102,6 +103,8 @@ export function ActionsProvider({ children }: ActionsProviderProps) {
   // Get workspace context (ActionsProvider is nested inside WorkspaceProvider)
   const { selectWorkspace, activeWorkspaces, workspaceId, workspace } =
     useWorkspaceContext();
+  // Get remote workspaces (optional — not available in VSCodeScope)
+  const userCtx = useContext(UserContext);
 
   // Get dev server state
   const { start, stop, runningDevServers } = useDevServer(workspaceId);
@@ -265,6 +268,7 @@ export function ActionsProvider({ children }: ActionsProviderProps) {
       kanbanOrgId: selectedOrgId ?? undefined,
       kanbanProjectId: projectId,
       projectMutations: projectMutations ?? undefined,
+      remoteWorkspaces: userCtx?.workspaces ?? [],
     };
   }, [
     navigate,
@@ -289,6 +293,7 @@ export function ActionsProvider({ children }: ActionsProviderProps) {
     selectedOrgId,
     projectId,
     projectMutations,
+    userCtx?.workspaces,
   ]);
 
   // Main action executor with centralized target validation and error handling
