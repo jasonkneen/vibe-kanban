@@ -43,6 +43,10 @@ interface WorkspacesSidebarProps {
   onLoadMore?: () => void;
   /** Whether there are more workspaces to load */
   hasMoreWorkspaces?: boolean;
+  /** Filter bar rendered below the search input */
+  filterBar?: React.ReactNode;
+  /** Called when the search input gains or loses focus */
+  onSearchFocusChange?: (focused: boolean) => void;
 }
 
 function WorkspaceList({
@@ -98,6 +102,8 @@ export function WorkspacesSidebar({
   onToggleLayoutMode,
   onLoadMore,
   hasMoreWorkspaces = false,
+  filterBar,
+  onSearchFocusChange,
 }: WorkspacesSidebarProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -165,13 +171,17 @@ export function WorkspacesSidebar({
           actions={headerActions}
           className="border-b"
         />
-        <div className="px-base">
-          <InputField
-            variant="search"
-            value={searchQuery}
-            onChange={onSearchChange}
-            placeholder={t('common:workspaces.searchPlaceholder')}
-          />
+        <div className="px-base flex items-stretch gap-half">
+          <div className="flex-1 min-w-0">
+            <InputField
+              variant="search"
+              value={searchQuery}
+              onChange={onSearchChange}
+              placeholder={t('common:workspaces.searchPlaceholder')}
+              onFocusChange={onSearchFocusChange}
+            />
+          </div>
+          {filterBar}
         </div>
       </div>
 
