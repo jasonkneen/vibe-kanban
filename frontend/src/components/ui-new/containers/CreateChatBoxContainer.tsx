@@ -7,9 +7,14 @@ import { useCreateWorkspace } from '@/hooks/useCreateWorkspace';
 import { useCreateAttachments } from '@/hooks/useCreateAttachments';
 import { getVariantOptions, areProfilesEqual } from '@/utils/executor';
 import { splitMessageToTitleDescription } from '@/utils/string';
-import type { ExecutorProfileId, BaseCodingAgent } from 'shared/types';
+import type { ExecutorProfileId, BaseCodingAgent, Repo } from 'shared/types';
 import { CreateChatBox } from '../primitives/CreateChatBox';
 import { SettingsDialog } from '../dialogs/SettingsDialog';
+import { CreateModeRepoPickerBar } from './CreateModeRepoPickerBar';
+
+function getRepoDisplayName(repo: Repo) {
+  return repo.display_name || repo.name;
+}
 
 export function CreateChatBoxContainer() {
   const { t } = useTranslation('common');
@@ -29,8 +34,20 @@ export function CreateChatBoxContainer() {
   } = useCreateMode();
 
   const { createWorkspace } = useCreateWorkspace();
+  const hasSelectedRepos = repos.length > 0;
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [hasInitializedStep, setHasInitializedStep] = useState(false);
+  const [isSelectingRepos, setIsSelectingRepos] = useState(true);
+
+  useEffect(() => {
+    if (!hasInitialValue || hasInitializedStep) return;
+    setIsSelectingRepos(!hasSelectedRepos);
+    setHasInitializedStep(true);
+  }, [hasInitialValue, hasInitializedStep, hasSelectedRepos]);
+
+  const showRepoPickerStep = !hasSelectedRepos || isSelectingRepos;
+  const showChatStep = hasSelectedRepos && !isSelectingRepos;
 
   // Attachment handling - insert markdown and track image IDs
   const handleInsertMarkdown = useCallback(
@@ -61,7 +78,7 @@ export function CreateChatBoxContainer() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { 'image/*': [] },
-    disabled: createWorkspace.isPending,
+    disabled: createWorkspace.isPending || !hasSelectedRepos,
     noClick: true,
     noKeyboard: true,
   });
@@ -106,13 +123,34 @@ export function CreateChatBoxContainer() {
   const projectId = selectedProjectId;
 
   const repoId = repos.length === 1 ? repos[0]?.id : undefined;
+  const repoSummaryLabel = useMemo(() => {
+    if (repos.length === 1) {
+      const repo = repos[0];
+      if (!repo) return '0 repositories selected';
+      const branch = targetBranches[repo.id] ?? 'Select branch';
+      return `${getRepoDisplayName(repo)} · ${branch}`;
+    }
+
+    return `${repos.length} repositories selected`;
+  }, [repos, targetBranches]);
+
+  const repoSummaryTitle = useMemo(
+    () =>
+      repos
+        .map((repo) => {
+          const branch = targetBranches[repo.id] ?? 'Select branch';
+          return `${getRepoDisplayName(repo)} (${branch})`;
+        })
+        .join('\n'),
+    [repos, targetBranches]
+  );
 
   // Determine if we can submit
   const canSubmit =
-    repos.length > 0 &&
+    hasSelectedRepos &&
     message.trim().length > 0 &&
     effectiveProfile !== null &&
-    projectId !== undefined;
+    projectId !== null;
 
   // Handle variant change
   const handleVariantChange = useCallback(
@@ -254,53 +292,79 @@ export function CreateChatBoxContainer() {
 
   return (
     <div className="relative flex flex-1 flex-col bg-primary h-full">
-      <div className="flex-1" />
-      <div className="flex justify-center @container">
-        <CreateChatBox
-          editor={{
-            value: message,
-            onChange: setMessage,
-          }}
-          onSend={handleSubmit}
-          isSending={createWorkspace.isPending}
-          executor={{
-            selected: effectiveProfile?.executor ?? null,
-            options: Object.keys(profiles ?? {}) as BaseCodingAgent[],
-            onChange: handleExecutorChange,
-          }}
-          variant={
-            effectiveProfile
-              ? {
-                  selected: effectiveProfile.variant ?? 'DEFAULT',
-                  options: variantOptions,
-                  onChange: handleVariantChange,
-                  onCustomise: handleCustomise,
-                }
-              : undefined
-          }
-          saveAsDefault={{
-            checked: saveAsDefault,
-            onChange: setSaveAsDefault,
-            visible: hasChangedFromDefault,
-          }}
-          error={displayError}
-          repoIds={repos.map((r) => r.id)}
-          projectId={projectId}
-          agent={effectiveProfile?.executor ?? null}
-          repoId={repoId}
-          onPasteFiles={uploadFiles}
-          localImages={localImages}
-          dropzone={{ getRootProps, getInputProps, isDragActive }}
-          linkedIssue={
-            linkedIssue?.simpleId
-              ? {
-                  simpleId: linkedIssue.simpleId,
-                  title: linkedIssue.title ?? '',
-                  onRemove: clearLinkedIssue,
-                }
-              : null
-          }
-        />
+      <div className="flex flex-1 items-center justify-center px-base">
+        <div className="flex w-chat max-w-full flex-col gap-base">
+          {showRepoPickerStep && (
+            <>
+              <h2 className="mb-double text-center text-4xl font-medium tracking-tight text-high">
+                {t('createMode.headings.repoStep')}
+              </h2>
+              <CreateModeRepoPickerBar
+                onContinueToPrompt={() => setIsSelectingRepos(false)}
+              />
+            </>
+          )}
+
+          {showChatStep && (
+            <>
+              <h2 className="mb-double text-center text-4xl font-medium tracking-tight text-high">
+                {t('createMode.headings.chatStep')}
+              </h2>
+
+              <div className="flex justify-center @container">
+                <CreateChatBox
+                  editor={{
+                    value: message,
+                    onChange: setMessage,
+                  }}
+                  onSend={handleSubmit}
+                  isSending={createWorkspace.isPending}
+                  disabled={!hasSelectedRepos}
+                  executor={{
+                    selected: effectiveProfile?.executor ?? null,
+                    options: Object.keys(profiles ?? {}) as BaseCodingAgent[],
+                    onChange: handleExecutorChange,
+                  }}
+                  variant={
+                    effectiveProfile
+                      ? {
+                          selected: effectiveProfile.variant ?? 'DEFAULT',
+                          options: variantOptions,
+                          onChange: handleVariantChange,
+                          onCustomise: handleCustomise,
+                        }
+                      : undefined
+                  }
+                  saveAsDefault={{
+                    checked: saveAsDefault,
+                    onChange: setSaveAsDefault,
+                    visible: hasChangedFromDefault,
+                  }}
+                  error={displayError}
+                  repoIds={repos.map((r) => r.id)}
+                  projectId={projectId}
+                  agent={effectiveProfile?.executor ?? null}
+                  repoId={repoId}
+                  onPasteFiles={uploadFiles}
+                  localImages={localImages}
+                  dropzone={{ getRootProps, getInputProps, isDragActive }}
+                  onEditRepos={() => setIsSelectingRepos(true)}
+                  repoSummaryLabel={repoSummaryLabel}
+                  repoSummaryTitle={repoSummaryTitle}
+                  linkedIssue={
+                    linkedIssue?.simpleId
+                      ? {
+                          simpleId: linkedIssue.simpleId,
+                          title: linkedIssue.title ?? '',
+                          onRemove: clearLinkedIssue,
+                        }
+                      : null
+                  }
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
