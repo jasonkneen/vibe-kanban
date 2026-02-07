@@ -48,7 +48,6 @@ function CommandBarContent({
   const queryClient = useQueryClient();
   const { executeAction, getLabel } = useActions();
   const { workspaceId: contextWorkspaceId, repos } = useWorkspaceContext();
-  const visibilityContext = useActionVisibilityContext();
 
   // Get issue context from props or route params (URL is single source of truth)
   const { projectId: routeProjectId, issueId: routeIssueId } = useParams<{
@@ -62,6 +61,10 @@ function CommandBarContent({
     () => propIssueIds ?? (routeIssueId ? [routeIssueId] : []),
     [propIssueIds, routeIssueId]
   );
+  const visibilityContext = useActionVisibilityContext({
+    projectId: effectiveProjectId,
+    issueIds: effectiveIssueIds,
+  });
 
   const effectiveWorkspaceId = workspaceId ?? contextWorkspaceId;
   const workspace = effectiveWorkspaceId
@@ -181,17 +184,15 @@ const CommandBarDialogImpl = NiceModal.create<CommandBarDialogProps>(
     repoId: initialRepoId,
     projectId: propProjectId,
     issueIds: propIssueIds,
-  }) => {
-    return (
-      <CommandBarContent
-        page={page}
-        workspaceId={workspaceId}
-        initialRepoId={initialRepoId}
-        propProjectId={propProjectId}
-        propIssueIds={propIssueIds}
-      />
-    );
-  }
+  }) => (
+    <CommandBarContent
+      page={page}
+      workspaceId={workspaceId}
+      initialRepoId={initialRepoId}
+      propProjectId={propProjectId}
+      propIssueIds={propIssueIds}
+    />
+  )
 );
 
 export const CommandBarDialog = defineModal<CommandBarDialogProps | void, void>(

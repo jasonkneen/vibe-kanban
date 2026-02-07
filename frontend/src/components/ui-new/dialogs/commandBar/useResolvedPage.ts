@@ -54,7 +54,9 @@ function expandGroupItems(
         },
       ];
     }
-    if (item.type === 'action' && !isActionVisible(item.action, ctx)) return [];
+    if (item.type === 'action') {
+      if (!isActionVisible(item.action, ctx)) return [];
+    }
     return [item];
   });
 }
