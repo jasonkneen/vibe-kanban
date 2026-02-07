@@ -1,6 +1,11 @@
 import type { RefCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { XIcon, LinkIcon, DotsThreeIcon } from '@phosphor-icons/react';
+import {
+  XIcon,
+  LinkIcon,
+  DotsThreeIcon,
+  TrashIcon,
+} from '@phosphor-icons/react';
 import WYSIWYGEditor from '@/components/ui/wysiwyg';
 import type {
   IssuePriority,
@@ -14,6 +19,7 @@ import { IssueTagsRow } from '@/components/ui-new/views/IssueTagsRow';
 import { PrimaryButton } from '@/components/ui-new/primitives/PrimaryButton';
 import { Toggle } from '@/components/ui-new/primitives/Toggle';
 import { CopyButton } from '@/components/ui-new/containers/CopyButton';
+import { IconButton } from '@/components/ui-new/primitives/IconButton';
 import { IssueCommentsSectionContainer } from '@/components/ui-new/containers/IssueCommentsSectionContainer';
 import { IssueSubIssuesSectionContainer } from '@/components/ui-new/containers/IssueSubIssuesSectionContainer';
 import { IssueRelationshipsSectionContainer } from '@/components/ui-new/containers/IssueRelationshipsSectionContainer';
@@ -67,6 +73,7 @@ export interface KanbanIssuePanelProps {
   onClose: () => void;
   onSubmit: () => void;
   onCmdEnterSubmit?: () => void;
+  onDeleteDraft?: () => void;
 
   // Tag create callback - returns the new tag ID
   onCreateTag?: (data: { name: string; color: string }) => string;
@@ -104,6 +111,7 @@ export function KanbanIssuePanel({
   onClose,
   onSubmit,
   onCmdEnterSubmit,
+  onDeleteDraft,
   onCreateTag,
   isSubmitting,
   descriptionSaveStatus,
@@ -272,7 +280,7 @@ export function KanbanIssuePanel({
 
         {/* Create Task Button (Create mode only) */}
         {isCreateMode && (
-          <div className="px-base pb-base">
+          <div className="px-base pb-base flex items-center gap-half">
             <PrimaryButton
               value="Create Task"
               onClick={onSubmit}
@@ -280,6 +288,16 @@ export function KanbanIssuePanel({
               actionIcon={isSubmitting ? 'spinner' : undefined}
               variant="default"
             />
+            {onDeleteDraft && (
+              <IconButton
+                icon={TrashIcon}
+                onClick={onDeleteDraft}
+                disabled={isSubmitting}
+                aria-label="Delete draft"
+                title="Delete draft"
+                className="hover:text-error hover:bg-error/10"
+              />
+            )}
           </div>
         )}
 
