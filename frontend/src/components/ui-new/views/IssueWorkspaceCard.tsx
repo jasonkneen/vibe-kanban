@@ -57,33 +57,22 @@ export interface IssueWorkspaceCardProps {
   className?: string;
 }
 
-export function IssueWorkspaceCard({
-  workspace,
-  onClick,
-  onUnlink,
-  onDelete,
-  showOwner = true,
-  showStatusBadge = true,
-  showNoPrText = true,
-  className,
-}: IssueWorkspaceCardProps) {
-  const { t } = useTranslation('common');
-  const timeAgo = getTimeAgo(
-    workspace.latestProcessCompletedAt ?? workspace.updatedAt
-  );
-  const isRunning = workspace.isRunning ?? false;
-  const hasPendingApproval = workspace.hasPendingApproval ?? false;
-  const hasRunningDevServer = workspace.hasRunningDevServer ?? false;
-  const hasUnseenActivity = workspace.hasUnseenActivity ?? false;
-  const isFailed =
-    workspace.latestProcessStatus === 'failed' ||
-    workspace.latestProcessStatus === 'killed';
-  const hasLiveStatusIndicator =
-    hasRunningDevServer ||
-    isFailed ||
-    isRunning ||
-    (hasUnseenActivity && !isRunning);
+export interface IssueWorkspaceCreateCardProps {
+  onClick?: () => void;
+  className?: string;
+}
 
+interface IssueWorkspaceCardContainerProps {
+  onClick?: () => void;
+  className?: string;
+  children: React.ReactNode;
+}
+
+function IssueWorkspaceCardContainer({
+  onClick,
+  className,
+  children,
+}: IssueWorkspaceCardContainerProps) {
   return (
     <div
       className={cn(
@@ -113,6 +102,40 @@ export function IssueWorkspaceCard({
           : undefined
       }
     >
+      {children}
+    </div>
+  );
+}
+
+export function IssueWorkspaceCard({
+  workspace,
+  onClick,
+  onUnlink,
+  onDelete,
+  showOwner = true,
+  showStatusBadge = true,
+  showNoPrText = true,
+  className,
+}: IssueWorkspaceCardProps) {
+  const { t } = useTranslation('common');
+  const timeAgo = getTimeAgo(
+    workspace.latestProcessCompletedAt ?? workspace.updatedAt
+  );
+  const isRunning = workspace.isRunning ?? false;
+  const hasPendingApproval = workspace.hasPendingApproval ?? false;
+  const hasRunningDevServer = workspace.hasRunningDevServer ?? false;
+  const hasUnseenActivity = workspace.hasUnseenActivity ?? false;
+  const isFailed =
+    workspace.latestProcessStatus === 'failed' ||
+    workspace.latestProcessStatus === 'killed';
+  const hasLiveStatusIndicator =
+    hasRunningDevServer ||
+    isFailed ||
+    isRunning ||
+    (hasUnseenActivity && !isRunning);
+
+  return (
+    <IssueWorkspaceCardContainer onClick={onClick} className={className}>
       {/* Row 1: Status badge + Name (left), Owner avatar + menu (right) */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-half min-w-0">
@@ -276,7 +299,42 @@ export function IssueWorkspaceCard({
           ) : null}
         </div>
       </div>
-    </div>
+    </IssueWorkspaceCardContainer>
+  );
+}
+
+export function IssueWorkspaceCreateCard({
+  onClick,
+  className,
+}: IssueWorkspaceCreateCardProps) {
+  const { t } = useTranslation('common');
+
+  return (
+    <IssueWorkspaceCardContainer
+      className={cn('border border-dashed border-border', className)}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-half min-w-0">
+          <span className="px-1.5 py-0.5 rounded text-xs font-medium shrink-0 bg-secondary text-low">
+            {t('workspaces.draft')}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-base">
+        <span className="text-sm text-low truncate">
+          {t('workspaces.newWorkspace')}
+        </span>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={!onClick}
+          className="shrink-0 rounded-sm px-base py-half text-cta h-cta flex items-center bg-brand text-on-brand hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {t('create', 'Create')}
+        </button>
+      </div>
+    </IssueWorkspaceCardContainer>
   );
 }
 
