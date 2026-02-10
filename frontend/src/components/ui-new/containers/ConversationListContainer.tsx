@@ -276,21 +276,26 @@ export const ConversationList = forwardRef<
     }, 100);
   };
 
-  const { hasSetupScriptRun, hasCleanupScriptRun, hasRunningProcess } =
-    useConversationHistory({ attempt, onEntriesUpdated });
+  const {
+    hasSetupScriptRun,
+    hasCleanupScriptRun,
+    hasRunningProcess,
+    isFirstTurn,
+  } = useConversationHistory({ attempt, onEntriesUpdated });
 
   // Determine if there are entries to show placeholders
   const entries = channelData?.data ?? [];
   const hasEntries = entries.length > 0;
 
-  // Show placeholders only if script not configured AND not already run
+  // Show placeholders only if script not configured AND not already run AND first turn
   const showSetupPlaceholder =
     !hasSetupScript && !hasSetupScriptRun && hasEntries;
   const showCleanupPlaceholder =
     !hasCleanupScript &&
     !hasCleanupScriptRun &&
     !hasRunningProcess &&
-    hasEntries;
+    hasEntries &&
+    isFirstTurn;
 
   const messageListRef = useRef<VirtuosoMessageListMethods | null>(null);
   const messageListContext = useMemo(
