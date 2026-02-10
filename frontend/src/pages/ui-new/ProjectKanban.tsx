@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Group, Layout, Panel, Separator } from 'react-resizable-panels';
 import { OrgProvider, useOrgContext } from '@/contexts/remote/OrgContext';
@@ -7,10 +7,6 @@ import {
   ProjectProvider,
   useProjectContext,
 } from '@/contexts/remote/ProjectContext';
-import {
-  ProjectRightSidebarProvider,
-  useProjectRightSidebar,
-} from '@/contexts/ProjectRightSidebarContext';
 import { useActions } from '@/contexts/ActionsContext';
 import { KanbanContainer } from '@/components/ui-new/containers/KanbanContainer';
 import { ProjectRightSidebarContainer } from '@/components/ui-new/containers/ProjectRightSidebarContainer';
@@ -21,6 +17,10 @@ import { useOrganizationProjects } from '@/hooks/useOrganizationProjects';
 import { useOrganizationStore } from '@/stores/useOrganizationStore';
 import { useKanbanNavigation } from '@/hooks/useKanbanNavigation';
 import { useAuth } from '@/hooks/auth/useAuth';
+import {
+  buildIssueCreatePath,
+  buildProjectRootPath,
+} from '@/lib/routes/projectSidebarRoutes';
 
 /**
  * Component that registers project mutations with ActionsContext.
@@ -82,13 +82,12 @@ function ProjectMutationsRegistration({ children }: { children: ReactNode }) {
 
 function ProjectKanbanLayout() {
   const { isPanelOpen } = useKanbanNavigation();
-  const { mode } = useProjectRightSidebar();
   const [kanbanLeftPanelSize, setKanbanLeftPanelSize] = usePaneSize(
     PERSIST_KEYS.kanbanLeftPanel,
     75
   );
 
-  const isRightPanelOpen = isPanelOpen || mode.type === 'workspace-create';
+  const isRightPanelOpen = isPanelOpen;
 
   const kanbanDefaultLayout: Layout =
     typeof kanbanLeftPanelSize === 'number'
@@ -167,11 +166,9 @@ function ProjectKanbanInner({ projectId }: { projectId: string }) {
 
   return (
     <ProjectProvider projectId={projectId}>
-      <ProjectRightSidebarProvider key={projectId}>
-        <ProjectMutationsRegistration>
-          <ProjectKanbanLayout />
-        </ProjectMutationsRegistration>
-      </ProjectRightSidebarProvider>
+      <ProjectMutationsRegistration>
+        <ProjectKanbanLayout />
+      </ProjectMutationsRegistration>
     </ProjectProvider>
   );
 }
@@ -211,40 +208,66 @@ function useFindProjectById(projectId: string | undefined) {
  * - /projects/:projectId - Kanban board with no issue selected
  * - /projects/:projectId/issues/:issueId - Kanban with issue panel open
  * - /projects/:projectId/issues/:issueId/workspaces/:workspaceId - Kanban with workspace session panel open
- * - /projects/:projectId?mode=create - Kanban with create issue panel
+ * - /projects/:projectId/issues/new - Kanban with create issue panel
+ * - /projects/:projectId/issues/:issueId/workspaces/create/:draftId - Kanban with workspace create panel
  *
  * Note: This component is rendered inside SharedAppLayout which provides
  * NavbarContainer, AppBar, and SyncErrorProvider.
  */
 export function ProjectKanban() {
-  const { projectId, issueId, workspaceId } = useKanbanNavigation();
+  const { projectId, hasInvalidWorkspaceCreateDraftId } = useKanbanNavigation();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { t } = useTranslation('common');
   const setSelectedOrgId = useOrganizationStore((s) => s.setSelectedOrgId);
   const { isSignedIn, isLoaded: authLoaded } = useAuth();
 
-  // One-time migration: if orgId is in URL, save to store and clean URL
+  // One-time URL migrations:
+  // - /projects/:projectId?mode=create -> /projects/:projectId/issues/new
+  // - strip orgId after storing it
   useEffect(() => {
+    if (!projectId) return;
+
+    if (hasInvalidWorkspaceCreateDraftId) {
+      navigate(buildProjectRootPath(projectId), { replace: true });
+      return;
+    }
+
     const orgIdFromUrl = searchParams.get('orgId');
-    if (orgIdFromUrl && projectId) {
+    if (orgIdFromUrl) {
       setSelectedOrgId(orgIdFromUrl);
-      // Preserve issueId if present
-      const targetUrl =
-        issueId && workspaceId
-          ? `/projects/${projectId}/issues/${issueId}/workspaces/${workspaceId}`
-          : issueId
-            ? `/projects/${projectId}/issues/${issueId}`
-            : `/projects/${projectId}`;
-      navigate(targetUrl, { replace: true });
+    }
+
+    const isLegacyCreateMode = searchParams.get('mode') === 'create';
+    if (isLegacyCreateMode) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('mode');
+      nextParams.delete('orgId');
+      const nextQuery = nextParams.toString();
+      const createPath = buildIssueCreatePath(projectId);
+      navigate(nextQuery ? `${createPath}?${nextQuery}` : createPath, {
+        replace: true,
+      });
+      return;
+    }
+
+    if (orgIdFromUrl) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('orgId');
+      const nextQuery = nextParams.toString();
+      navigate(
+        nextQuery ? `${location.pathname}?${nextQuery}` : location.pathname,
+        { replace: true }
+      );
     }
   }, [
     searchParams,
     projectId,
-    issueId,
-    workspaceId,
+    hasInvalidWorkspaceCreateDraftId,
     setSelectedOrgId,
     navigate,
+    location.pathname,
   ]);
 
   // Find the project and get its organization

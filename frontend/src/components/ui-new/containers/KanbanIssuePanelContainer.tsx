@@ -12,7 +12,7 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { useProjectContext } from '@/contexts/remote/ProjectContext';
 import { useOrgContext } from '@/contexts/remote/OrgContext';
 import { useKanbanNavigation } from '@/hooks/useKanbanNavigation';
-import { useProjectRightSidebar } from '@/contexts/ProjectRightSidebarContext';
+import { useProjectWorkspaceCreateDraft } from '@/hooks/useProjectWorkspaceCreateDraft';
 import {
   KanbanIssuePanel,
   type IssueFormData,
@@ -22,6 +22,11 @@ import { useUserContext } from '@/contexts/remote/UserContext';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
 import { CommandBarDialog } from '@/components/ui-new/dialogs/CommandBarDialog';
 import { getWorkspaceDefaults } from '@/lib/workspaceDefaults';
+import {
+  buildLinkedIssueCreateState,
+  buildWorkspaceCreateInitialState,
+  buildWorkspaceCreatePrompt,
+} from '@/lib/workspaceCreateState';
 import { ScratchType, type DraftIssueData } from 'shared/types';
 import { useScratch } from '@/hooks/useScratch';
 import {
@@ -53,7 +58,7 @@ export function KanbanIssuePanelContainer() {
     updateCreateDefaults,
   } = useKanbanNavigation();
 
-  const { openWorkspaceCreate } = useProjectRightSidebar();
+  const { openWorkspaceCreateFromState } = useProjectWorkspaceCreateDraft();
   const { workspaces } = useUserContext();
   const { activeWorkspaces, archivedWorkspaces } = useWorkspaceContext();
 
@@ -733,10 +738,10 @@ export function KanbanIssuePanelContainer() {
 
         // Navigate to workspace creation if requested
         if (displayData.createDraftWorkspace) {
-          // Build initial prompt from issue title and description
-          const initialPrompt = displayData.description
-            ? `${displayData.title}\n\n${displayData.description}`
-            : displayData.title;
+          const initialPrompt = buildWorkspaceCreatePrompt(
+            displayData.title,
+            displayData.description
+          );
 
           // Get defaults from most recent workspace
           const defaults = await getWorkspaceDefaults(
@@ -748,17 +753,17 @@ export function KanbanIssuePanelContainer() {
           cancelDebouncedDraftIssue();
           deleteDraftIssueScratch().catch(console.error);
 
-          openWorkspaceCreate({
-            initialPrompt,
-            preferredRepos: defaults?.preferredRepos ?? null,
-            project_id: defaults?.project_id ?? null,
-            linkedIssue: {
-              issueId: syncedIssue.id,
-              simpleId: syncedIssue.simple_id,
-              title: displayData.title,
-              remoteProjectId: projectId,
-            },
+          const createState = buildWorkspaceCreateInitialState({
+            prompt: initialPrompt,
+            defaults,
+            linkedIssue: buildLinkedIssueCreateState(syncedIssue, projectId),
           });
+          const draftId = await openWorkspaceCreateFromState(createState, {
+            issueId: syncedIssue.id,
+          });
+          if (!draftId) {
+            openIssue(syncedIssue.id);
+          }
           return; // Don't open issue panel since we're navigating away
         }
 
@@ -788,7 +793,7 @@ export function KanbanIssuePanelContainer() {
     insertIssueTag,
     openIssue,
     kanbanCreateDefaultParentIssueId,
-    openWorkspaceCreate,
+    openWorkspaceCreateFromState,
     workspaces,
     localWorkspaceIds,
     closeKanbanIssuePanel,

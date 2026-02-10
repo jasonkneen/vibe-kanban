@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { LinkIcon, PlusIcon } from '@phosphor-icons/react';
 import { useProjectContext } from '@/contexts/remote/ProjectContext';
@@ -7,10 +7,16 @@ import { useAuth } from '@/hooks/auth/useAuth';
 import { useOrgContext } from '@/contexts/remote/OrgContext';
 import { useUserContext } from '@/contexts/remote/UserContext';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
-import { useProjectRightSidebar } from '@/contexts/ProjectRightSidebarContext';
 import { useKanbanNavigation } from '@/hooks/useKanbanNavigation';
+import { useProjectWorkspaceCreateDraft } from '@/hooks/useProjectWorkspaceCreateDraft';
 import { attemptsApi } from '@/lib/api';
 import { getWorkspaceDefaults } from '@/lib/workspaceDefaults';
+import {
+  buildLinkedIssueCreateState,
+  buildLocalWorkspaceIdSet,
+  buildWorkspaceCreateInitialState,
+  buildWorkspaceCreatePrompt,
+} from '@/lib/workspaceCreateState';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
 import type { WorkspaceWithStats } from '@/components/ui-new/views/IssueWorkspaceCard';
 import { IssueWorkspacesSection } from '@/components/ui-new/views/IssueWorkspacesSection';
@@ -28,9 +34,10 @@ export function IssueWorkspacesSectionContainer({
   issueId,
 }: IssueWorkspacesSectionContainerProps) {
   const { t } = useTranslation('common');
+  const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
-  const { openWorkspaceCreate } = useProjectRightSidebar();
   const { openIssueWorkspace } = useKanbanNavigation();
+  const { openWorkspaceCreateFromState } = useProjectWorkspaceCreateDraft();
   const { userId } = useAuth();
   const { workspaces } = useUserContext();
 
@@ -117,35 +124,34 @@ export function IssueWorkspacesSectionContainer({
     }
 
     const issue = getIssue(issueId);
-    const initialPrompt = issue
-      ? issue.description
-        ? `${issue.title}\n\n${issue.description}`
-        : issue.title
-      : null;
-
-    const localWorkspaceIds = new Set([
-      ...activeWorkspaces.map((workspace) => workspace.id),
-      ...archivedWorkspaces.map((workspace) => workspace.id),
-    ]);
+    const initialPrompt = buildWorkspaceCreatePrompt(
+      issue?.title ?? null,
+      issue?.description ?? null
+    );
+    const localWorkspaceIds = buildLocalWorkspaceIdSet(
+      activeWorkspaces,
+      archivedWorkspaces
+    );
 
     const defaults = await getWorkspaceDefaults(workspaces, localWorkspaceIds);
-
-    openWorkspaceCreate({
-      initialPrompt,
-      preferredRepos: defaults?.preferredRepos ?? null,
-      project_id: defaults?.project_id ?? null,
-      linkedIssue: issue
-        ? {
-            issueId: issue.id,
-            simpleId: issue.simple_id,
-            title: issue.title,
-            remoteProjectId: projectId,
-          }
-        : null,
+    const createState = buildWorkspaceCreateInitialState({
+      prompt: initialPrompt,
+      defaults,
+      linkedIssue: buildLinkedIssueCreateState(issue, projectId),
     });
+
+    const draftId = await openWorkspaceCreateFromState(createState, {
+      issueId,
+    });
+    if (!draftId) {
+      navigate('/workspaces/create', {
+        state: createState,
+      });
+    }
   }, [
+    navigate,
     projectId,
-    openWorkspaceCreate,
+    openWorkspaceCreateFromState,
     getIssue,
     issueId,
     activeWorkspaces,
