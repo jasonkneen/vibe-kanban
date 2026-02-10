@@ -8,6 +8,8 @@ import { useAuth } from '@/hooks/auth/useAuth';
 import {
   useUiPreferencesStore,
   resolveKanbanProjectState,
+  type KanbanFilterState,
+  type KanbanSortField,
 } from '@/stores/useUiPreferencesStore';
 import { useKanbanFilters, PRIORITY_ORDER } from '@/hooks/useKanbanFilters';
 import { bulkUpdateIssues, type BulkUpdateIssueItem } from '@/lib/remoteApi';
@@ -40,6 +42,42 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui-new/primitives/Dropdown';
+import type { IssuePriority } from 'shared/remote-types';
+
+const areStringSetsEqual = (left: string[], right: string[]): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
+};
+
+const areKanbanFiltersEqual = (
+  left: KanbanFilterState,
+  right: KanbanFilterState
+): boolean => {
+  if (left.searchQuery.trim() !== right.searchQuery.trim()) {
+    return false;
+  }
+
+  if (!areStringSetsEqual(left.priorities, right.priorities)) {
+    return false;
+  }
+
+  if (!areStringSetsEqual(left.assigneeIds, right.assigneeIds)) {
+    return false;
+  }
+
+  if (!areStringSetsEqual(left.tagIds, right.tagIds)) {
+    return false;
+  }
+
+  return (
+    left.sortField === right.sortField &&
+    left.sortDirection === right.sortDirection
+  );
+};
 
 function LoadingState() {
   const { t } = useTranslation('common');
@@ -65,9 +103,6 @@ export function KanbanContainer() {
     tags,
     issueAssignees,
     issueTags,
-    insertStatus,
-    updateStatus,
-    removeStatus,
     getTagObjectsForIssue,
     getTagsForIssue,
     getPullRequestsForIssue,
@@ -93,14 +128,6 @@ export function KanbanContainer() {
   const projectName = projects.find((p) => p.id === projectId)?.name ?? '';
 
   // Apply filters
-  const { filteredIssues, hasActiveFilters } = useKanbanFilters({
-    issues,
-    issueAssignees,
-    issueTags,
-    projectId,
-    currentUserId: userId,
-  });
-
   // Navigation hook for opening issues and create mode
   const {
     issueId: selectedKanbanIssueId,
@@ -117,12 +144,142 @@ export function KanbanContainer() {
     openAssigneeSelection,
   } = useActions();
 
-  const projectViewState = useUiPreferencesStore(
-    (s) => s.kanbanProjectViewsByProject[projectId]
+  const projectViewSelection = useUiPreferencesStore(
+    (s) => s.kanbanProjectViewSelections[projectId]
   );
-  const { filters: kanbanFilters, showWorkspaces } = useMemo(
-    () => resolveKanbanProjectState(projectViewState),
-    [projectViewState]
+  const projectViewPreferencesById = useUiPreferencesStore(
+    (s) => s.kanbanProjectViewPreferences[projectId]
+  );
+  const setKanbanProjectView = useUiPreferencesStore(
+    (s) => s.setKanbanProjectView
+  );
+  const setKanbanProjectViewFilters = useUiPreferencesStore(
+    (s) => s.setKanbanProjectViewFilters
+  );
+  const setKanbanProjectViewShowSubIssues = useUiPreferencesStore(
+    (s) => s.setKanbanProjectViewShowSubIssues
+  );
+  const setKanbanProjectViewShowWorkspaces = useUiPreferencesStore(
+    (s) => s.setKanbanProjectViewShowWorkspaces
+  );
+  const clearKanbanProjectViewPreferences = useUiPreferencesStore(
+    (s) => s.clearKanbanProjectViewPreferences
+  );
+  const resolvedProjectState = useMemo(
+    () => resolveKanbanProjectState(projectViewSelection),
+    [projectViewSelection]
+  );
+  const {
+    activeViewId,
+    filters: defaultKanbanFilters,
+    showSubIssues: defaultShowSubIssues,
+    showWorkspaces: defaultShowWorkspaces,
+  } = resolvedProjectState;
+  const projectViewPreferences = projectViewPreferencesById?.[activeViewId];
+  const kanbanFilters = projectViewPreferences?.filters ?? defaultKanbanFilters;
+  const showSubIssues =
+    projectViewPreferences?.showSubIssues ?? defaultShowSubIssues;
+  const showWorkspaces =
+    projectViewPreferences?.showWorkspaces ?? defaultShowWorkspaces;
+
+  const hasActiveFilters = useMemo(
+    () =>
+      !areKanbanFiltersEqual(kanbanFilters, defaultKanbanFilters) ||
+      showSubIssues !== defaultShowSubIssues ||
+      showWorkspaces !== defaultShowWorkspaces,
+    [
+      kanbanFilters,
+      defaultKanbanFilters,
+      showSubIssues,
+      defaultShowSubIssues,
+      showWorkspaces,
+      defaultShowWorkspaces,
+    ]
+  );
+
+  const { filteredIssues } = useKanbanFilters({
+    issues,
+    issueAssignees,
+    issueTags,
+    filters: kanbanFilters,
+    showSubIssues,
+    currentUserId: userId,
+  });
+
+  const setKanbanSearchQuery = useCallback(
+    (searchQuery: string) => {
+      setKanbanProjectViewFilters(projectId, activeViewId, {
+        ...kanbanFilters,
+        searchQuery,
+      });
+    },
+    [activeViewId, kanbanFilters, projectId, setKanbanProjectViewFilters]
+  );
+
+  const setKanbanPriorities = useCallback(
+    (priorities: IssuePriority[]) => {
+      setKanbanProjectViewFilters(projectId, activeViewId, {
+        ...kanbanFilters,
+        priorities,
+      });
+    },
+    [activeViewId, kanbanFilters, projectId, setKanbanProjectViewFilters]
+  );
+
+  const setKanbanAssignees = useCallback(
+    (assigneeIds: string[]) => {
+      setKanbanProjectViewFilters(projectId, activeViewId, {
+        ...kanbanFilters,
+        assigneeIds,
+      });
+    },
+    [activeViewId, kanbanFilters, projectId, setKanbanProjectViewFilters]
+  );
+
+  const setKanbanTags = useCallback(
+    (tagIds: string[]) => {
+      setKanbanProjectViewFilters(projectId, activeViewId, {
+        ...kanbanFilters,
+        tagIds,
+      });
+    },
+    [activeViewId, kanbanFilters, projectId, setKanbanProjectViewFilters]
+  );
+
+  const setKanbanSort = useCallback(
+    (sortField: KanbanSortField, sortDirection: 'asc' | 'desc') => {
+      setKanbanProjectViewFilters(projectId, activeViewId, {
+        ...kanbanFilters,
+        sortField,
+        sortDirection,
+      });
+    },
+    [activeViewId, kanbanFilters, projectId, setKanbanProjectViewFilters]
+  );
+
+  const setShowSubIssues = useCallback(
+    (show: boolean) => {
+      setKanbanProjectViewShowSubIssues(projectId, activeViewId, show);
+    },
+    [activeViewId, projectId, setKanbanProjectViewShowSubIssues]
+  );
+
+  const setShowWorkspaces = useCallback(
+    (show: boolean) => {
+      setKanbanProjectViewShowWorkspaces(projectId, activeViewId, show);
+    },
+    [activeViewId, projectId, setKanbanProjectViewShowWorkspaces]
+  );
+
+  const clearKanbanFilters = useCallback(() => {
+    clearKanbanProjectViewPreferences(projectId, activeViewId);
+  }, [activeViewId, clearKanbanProjectViewPreferences, projectId]);
+
+  const handleKanbanProjectViewChange = useCallback(
+    (viewId: string) => {
+      setKanbanProjectView(projectId, viewId);
+    },
+    [projectId, setKanbanProjectView]
   );
   const kanbanViewMode = useUiPreferencesStore((s) => s.kanbanViewMode);
   const listViewStatusFilter = useUiPreferencesStore(
@@ -132,30 +289,7 @@ export function KanbanContainer() {
   const setListViewStatusFilter = useUiPreferencesStore(
     (s) => s.setListViewStatusFilter
   );
-  const ensureKanbanProjectViews = useUiPreferencesStore(
-    (s) => s.ensureKanbanProjectViews
-  );
-  const applyKanbanView = useUiPreferencesStore((s) => s.applyKanbanView);
-
-  // Ensure project-specific views/draft state when entering a project.
-  useEffect(() => {
-    ensureKanbanProjectViews(projectId);
-  }, [projectId, ensureKanbanProjectViews]);
-
-  useEffect(() => {
-    if (!projectViewState) {
-      return;
-    }
-
-    const activeViewExists = projectViewState.views.some(
-      (view) => view.id === projectViewState.activeViewId
-    );
-    if (!activeViewExists && projectViewState.views.length > 0) {
-      applyKanbanView(projectId, projectViewState.views[0].id);
-    }
-  }, [projectId, projectViewState, applyKanbanView]);
-
-  // Reset view mode and ensure project-specific views when navigating projects
+  // Reset view mode when navigating projects
   const prevProjectIdRef = useRef<string | null>(null);
 
   // Track when drag-drop sync is in progress to prevent flicker
@@ -228,17 +362,6 @@ export function KanbanContainer() {
     }
     return sortedStatuses;
   }, [sortedStatuses, listViewStatusFilter]);
-
-  // Compute issue count by status for display settings
-  const issueCountByStatus = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const status of statuses) {
-      counts[status.id] = issues.filter(
-        (i) => i.status_id === status.id
-      ).length;
-    }
-    return counts;
-  }, [statuses, issues]);
 
   // Track items as arrays of IDs grouped by status
   const [items, setItems] = useState<Record<string, string[]>>({});
@@ -317,6 +440,11 @@ export function KanbanContainer() {
     }
     return map;
   }, [issueAssignees, membersWithProfilesById]);
+
+  const membersWithProfiles = useMemo(
+    () => [...membersWithProfilesById.values()],
+    [membersWithProfilesById]
+  );
 
   const localWorkspacesById = useMemo(() => {
     const map = new Map<string, (typeof activeWorkspaces)[number]>();
@@ -631,14 +759,23 @@ export function KanbanContainer() {
             isFiltersDialogOpen={isFiltersDialogOpen}
             onFiltersDialogOpenChange={setIsFiltersDialogOpen}
             tags={tags}
-            users={[...membersWithProfilesById.values()]}
-            hasActiveFilters={hasActiveFilters}
-            statuses={sortedStatuses}
+            users={membersWithProfiles}
+            activeViewId={activeViewId}
+            onViewChange={handleKanbanProjectViewChange}
             projectId={projectId}
-            issueCountByStatus={issueCountByStatus}
-            onInsertStatus={insertStatus}
-            onUpdateStatus={updateStatus}
-            onRemoveStatus={removeStatus}
+            currentUserId={userId}
+            filters={kanbanFilters}
+            showSubIssues={showSubIssues}
+            showWorkspaces={showWorkspaces}
+            hasActiveFilters={hasActiveFilters}
+            onSearchQueryChange={setKanbanSearchQuery}
+            onPrioritiesChange={setKanbanPriorities}
+            onAssigneesChange={setKanbanAssignees}
+            onTagsChange={setKanbanTags}
+            onSortChange={setKanbanSort}
+            onShowSubIssuesChange={setShowSubIssues}
+            onShowWorkspacesChange={setShowWorkspaces}
+            onClearFilters={clearKanbanFilters}
             onCreateIssue={handleAddTask}
           />
         </div>

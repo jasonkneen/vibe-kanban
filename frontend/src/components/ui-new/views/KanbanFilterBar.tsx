@@ -1,13 +1,12 @@
-import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FunnelIcon, PlusIcon, XIcon } from '@phosphor-icons/react';
-import type { Tag, ProjectStatus } from 'shared/remote-types';
+import type { IssuePriority, Tag } from 'shared/remote-types';
 import type { OrganizationMemberWithProfile } from 'shared/types';
 import { cn } from '@/lib/utils';
 import {
-  useUiPreferencesStore,
   KANBAN_PROJECT_VIEW_IDS,
-  resolveKanbanProjectState,
+  type KanbanFilterState,
+  type KanbanSortField,
 } from '@/stores/useUiPreferencesStore';
 import { InputField } from '@/components/ui-new/primitives/InputField';
 import { PrimaryButton } from '@/components/ui-new/primitives/PrimaryButton';
@@ -22,28 +21,25 @@ interface KanbanFilterBarProps {
   onFiltersDialogOpenChange: (open: boolean) => void;
   tags: Tag[];
   users: OrganizationMemberWithProfile[];
-  hasActiveFilters: boolean;
-  statuses: ProjectStatus[];
+  activeViewId: string;
+  onViewChange: (viewId: string) => void;
   projectId: string;
-  issueCountByStatus: Record<string, number>;
-  onInsertStatus: (data: {
-    id: string;
-    project_id: string;
-    name: string;
-    color: string;
-    sort_order: number;
-    hidden: boolean;
-  }) => void;
-  onUpdateStatus: (
-    id: string,
-    changes: {
-      name?: string;
-      color?: string;
-      sort_order?: number;
-      hidden?: boolean;
-    }
+  currentUserId: string | null;
+  filters: KanbanFilterState;
+  showSubIssues: boolean;
+  showWorkspaces: boolean;
+  hasActiveFilters: boolean;
+  onSearchQueryChange: (searchQuery: string) => void;
+  onPrioritiesChange: (priorities: IssuePriority[]) => void;
+  onAssigneesChange: (assigneeIds: string[]) => void;
+  onTagsChange: (tagIds: string[]) => void;
+  onSortChange: (
+    sortField: KanbanSortField,
+    sortDirection: 'asc' | 'desc'
   ) => void;
-  onRemoveStatus: (id: string) => void;
+  onShowSubIssuesChange: (show: boolean) => void;
+  onShowWorkspacesChange: (show: boolean) => void;
+  onClearFilters: () => void;
   onCreateIssue: () => void;
 }
 
@@ -52,33 +48,28 @@ export function KanbanFilterBar({
   onFiltersDialogOpenChange,
   tags,
   users,
-  hasActiveFilters,
-  statuses,
+  activeViewId,
+  onViewChange,
   projectId,
-  issueCountByStatus,
-  onInsertStatus,
-  onUpdateStatus,
-  onRemoveStatus,
+  currentUserId,
+  filters,
+  showSubIssues,
+  showWorkspaces,
+  hasActiveFilters,
+  onSearchQueryChange,
+  onPrioritiesChange,
+  onAssigneesChange,
+  onTagsChange,
+  onSortChange,
+  onShowSubIssuesChange,
+  onShowWorkspacesChange,
+  onClearFilters,
   onCreateIssue,
 }: KanbanFilterBarProps) {
   const { t } = useTranslation('common');
 
-  const projectViewState = useUiPreferencesStore(
-    (s) => s.kanbanProjectViewsByProject[projectId]
-  );
-  const applyKanbanView = useUiPreferencesStore((s) => s.applyKanbanView);
-  const clearKanbanFilters = useUiPreferencesStore((s) => s.clearKanbanFilters);
-  const setKanbanSearchQuery = useUiPreferencesStore(
-    (s) => s.setKanbanSearchQuery
-  );
-
-  const { activeViewId, filters: kanbanFilters } = useMemo(
-    () => resolveKanbanProjectState(projectViewState),
-    [projectViewState]
-  );
-
-  const handleViewChange = (viewId: string) => {
-    applyKanbanView(projectId, viewId);
+  const handleClearSearch = () => {
+    onSearchQueryChange('');
   };
 
   return (
@@ -87,25 +78,25 @@ export function KanbanFilterBar({
         <ButtonGroup className="flex-wrap">
           <ButtonGroupItem
             active={activeViewId === KANBAN_PROJECT_VIEW_IDS.TEAM}
-            onClick={() => handleViewChange(KANBAN_PROJECT_VIEW_IDS.TEAM)}
+            onClick={() => onViewChange(KANBAN_PROJECT_VIEW_IDS.TEAM)}
           >
             {t('kanban.team', 'Team')}
           </ButtonGroupItem>
           <ButtonGroupItem
             active={activeViewId === KANBAN_PROJECT_VIEW_IDS.PERSONAL}
-            onClick={() => handleViewChange(KANBAN_PROJECT_VIEW_IDS.PERSONAL)}
+            onClick={() => onViewChange(KANBAN_PROJECT_VIEW_IDS.PERSONAL)}
           >
             {t('kanban.personal', 'Personal')}
           </ButtonGroupItem>
         </ButtonGroup>
 
         <InputField
-          value={kanbanFilters.searchQuery}
-          onChange={(query) => setKanbanSearchQuery(projectId, query)}
+          value={filters.searchQuery}
+          onChange={onSearchQueryChange}
           placeholder={t('kanban.searchPlaceholder', 'Search issues...')}
           variant="search"
-          actionIcon={kanbanFilters.searchQuery ? XIcon : undefined}
-          onAction={() => setKanbanSearchQuery(projectId, '')}
+          actionIcon={filters.searchQuery ? XIcon : undefined}
+          onAction={handleClearSearch}
           className="min-w-[160px] w-[220px] max-w-full"
         />
 
@@ -129,7 +120,7 @@ export function KanbanFilterBar({
             variant="tertiary"
             value={t('kanban.clearFilters', 'Clear filters')}
             actionIcon={XIcon}
-            onClick={() => clearKanbanFilters(projectId)}
+            onClick={onClearFilters}
           />
         )}
 
@@ -137,22 +128,26 @@ export function KanbanFilterBar({
           variant="secondary"
           value={t('kanban.newIssue', 'New issue')}
           actionIcon={PlusIcon}
-          onClick={() => onCreateIssue()}
+          onClick={onCreateIssue}
         />
       </div>
 
       <KanbanFiltersDialog
         open={isFiltersDialogOpen}
         onOpenChange={onFiltersDialogOpenChange}
+        projectId={projectId}
+        currentUserId={currentUserId}
         tags={tags}
         users={users}
-        hasActiveFilters={hasActiveFilters}
-        statuses={statuses}
-        projectId={projectId}
-        issueCountByStatus={issueCountByStatus}
-        onInsertStatus={onInsertStatus}
-        onUpdateStatus={onUpdateStatus}
-        onRemoveStatus={onRemoveStatus}
+        filters={filters}
+        showSubIssues={showSubIssues}
+        showWorkspaces={showWorkspaces}
+        onPrioritiesChange={onPrioritiesChange}
+        onAssigneesChange={onAssigneesChange}
+        onTagsChange={onTagsChange}
+        onSortChange={onSortChange}
+        onShowSubIssuesChange={onShowSubIssuesChange}
+        onShowWorkspacesChange={onShowWorkspacesChange}
       />
     </>
   );
