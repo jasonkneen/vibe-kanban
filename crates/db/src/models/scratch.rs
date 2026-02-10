@@ -50,7 +50,7 @@ pub struct WorkspacePanelStateData {
 }
 
 /// Kanban filters stored in UI preferences scratch
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS, Default)]
 pub struct KanbanFiltersData {
     #[serde(default)]
     pub search_query: String,
@@ -64,6 +64,17 @@ pub struct KanbanFiltersData {
     pub sort_field: String,
     #[serde(default)]
     pub sort_direction: String,
+}
+
+/// Working kanban draft state stored in UI preferences scratch
+#[derive(Debug, Clone, Serialize, Deserialize, TS, Default)]
+pub struct KanbanProjectDraftData {
+    #[serde(default)]
+    pub filters: KanbanFiltersData,
+    #[serde(default)]
+    pub show_sub_issues: bool,
+    #[serde(default)]
+    pub show_workspaces: bool,
 }
 
 /// A saved kanban project view stored in UI preferences scratch
@@ -82,6 +93,8 @@ pub struct KanbanProjectViewsStateData {
     pub active_view_id: String,
     #[serde(default)]
     pub views: Vec<KanbanProjectViewData>,
+    #[serde(default)]
+    pub draft: Option<KanbanProjectDraftData>,
 }
 
 /// Data for UI preferences scratch (global preferences stored per-user or per-device)

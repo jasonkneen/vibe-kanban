@@ -52,7 +52,7 @@ export type KanbanFilterState = {
   sortDirection: 'asc' | 'desc';
 };
 
-const DEFAULT_KANBAN_FILTER_STATE: KanbanFilterState = {
+export const DEFAULT_KANBAN_FILTER_STATE: KanbanFilterState = {
   searchQuery: '',
   priorities: [],
   assigneeIds: [],
@@ -72,6 +72,10 @@ export const KANBAN_PROJECT_VIEW_IDS = {
 } as const;
 
 export const DEFAULT_KANBAN_PROJECT_VIEW_ID = KANBAN_PROJECT_VIEW_IDS.TEAM;
+export const DEFAULT_KANBAN_SHOW_WORKSPACES = true;
+
+export const getDefaultShowSubIssuesForView = (viewId: string): boolean =>
+  viewId === KANBAN_PROJECT_VIEW_IDS.PERSONAL;
 
 export type KanbanProjectView = {
   id: string;
@@ -81,9 +85,24 @@ export type KanbanProjectView = {
   showWorkspaces: boolean;
 };
 
+export type KanbanProjectDraftState = {
+  filters: KanbanFilterState;
+  showSubIssues: boolean;
+  showWorkspaces: boolean;
+};
+
 export type KanbanProjectViewsState = {
   activeViewId: string;
   views: KanbanProjectView[];
+  draft: KanbanProjectDraftState;
+};
+
+export type ResolvedKanbanProjectState = {
+  activeViewId: string;
+  activeView: KanbanProjectView;
+  filters: KanbanFilterState;
+  showSubIssues: boolean;
+  showWorkspaces: boolean;
 };
 
 const cloneKanbanFilters = (filters: KanbanFilterState): KanbanFilterState => ({
@@ -95,30 +114,91 @@ const cloneKanbanFilters = (filters: KanbanFilterState): KanbanFilterState => ({
   sortDirection: filters.sortDirection,
 });
 
-const createDefaultKanbanProjectViewsState = (): KanbanProjectViewsState => ({
-  activeViewId: DEFAULT_KANBAN_PROJECT_VIEW_ID,
-  views: [
-    {
-      id: KANBAN_PROJECT_VIEW_IDS.TEAM,
-      name: 'Team',
-      filters: cloneKanbanFilters(DEFAULT_KANBAN_FILTER_STATE),
-      showSubIssues: false,
-      showWorkspaces: false,
-    },
-    {
-      id: KANBAN_PROJECT_VIEW_IDS.PERSONAL,
-      name: 'Personal',
-      filters: {
-        ...cloneKanbanFilters(DEFAULT_KANBAN_FILTER_STATE),
-        assigneeIds: [KANBAN_ASSIGNEE_FILTER_VALUES.SELF],
-        sortField: 'priority',
-        sortDirection: 'asc',
-      },
-      showSubIssues: true,
-      showWorkspaces: true,
-    },
-  ],
+const createDraftFromView = (
+  view: KanbanProjectView
+): KanbanProjectDraftState => ({
+  filters: cloneKanbanFilters(view.filters),
+  showSubIssues: view.showSubIssues,
+  showWorkspaces: view.showWorkspaces,
 });
+
+const cloneKanbanProjectDraft = (
+  draft: KanbanProjectDraftState
+): KanbanProjectDraftState => ({
+  filters: cloneKanbanFilters(draft.filters),
+  showSubIssues: draft.showSubIssues,
+  showWorkspaces: draft.showWorkspaces,
+});
+
+const getDefaultKanbanProjectViews = (): KanbanProjectView[] => [
+  {
+    id: KANBAN_PROJECT_VIEW_IDS.TEAM,
+    name: 'Team',
+    filters: cloneKanbanFilters(DEFAULT_KANBAN_FILTER_STATE),
+    showSubIssues: getDefaultShowSubIssuesForView(KANBAN_PROJECT_VIEW_IDS.TEAM),
+    showWorkspaces: DEFAULT_KANBAN_SHOW_WORKSPACES,
+  },
+  {
+    id: KANBAN_PROJECT_VIEW_IDS.PERSONAL,
+    name: 'Personal',
+    filters: {
+      ...cloneKanbanFilters(DEFAULT_KANBAN_FILTER_STATE),
+      assigneeIds: [KANBAN_ASSIGNEE_FILTER_VALUES.SELF],
+      sortField: 'priority',
+      sortDirection: 'asc',
+    },
+    showSubIssues: getDefaultShowSubIssuesForView(
+      KANBAN_PROJECT_VIEW_IDS.PERSONAL
+    ),
+    showWorkspaces: DEFAULT_KANBAN_SHOW_WORKSPACES,
+  },
+];
+
+const createDefaultKanbanProjectViewsState = (): KanbanProjectViewsState => {
+  const views = getDefaultKanbanProjectViews();
+
+  const activeView =
+    views.find((view) => view.id === DEFAULT_KANBAN_PROJECT_VIEW_ID) ??
+    views[0];
+
+  return {
+    activeViewId: DEFAULT_KANBAN_PROJECT_VIEW_ID,
+    views,
+    draft: activeView
+      ? createDraftFromView(activeView)
+      : {
+          filters: cloneKanbanFilters(DEFAULT_KANBAN_FILTER_STATE),
+          showSubIssues: getDefaultShowSubIssuesForView(
+            DEFAULT_KANBAN_PROJECT_VIEW_ID
+          ),
+          showWorkspaces: DEFAULT_KANBAN_SHOW_WORKSPACES,
+        },
+  };
+};
+
+export const resolveKanbanProjectState = (
+  projectState: KanbanProjectViewsState | undefined
+): ResolvedKanbanProjectState => {
+  const defaultState = createDefaultKanbanProjectViewsState();
+  const activeViewId = projectState?.activeViewId ?? defaultState.activeViewId;
+  const views = projectState?.views.length
+    ? projectState.views
+    : defaultState.views;
+  const activeView =
+    views.find((view) => view.id === activeViewId) ??
+    defaultState.views.find((view) => view.id === activeViewId) ??
+    defaultState.views[0];
+
+  return {
+    activeViewId,
+    activeView,
+    filters: projectState?.draft.filters ?? activeView.filters,
+    showSubIssues:
+      projectState?.draft.showSubIssues ?? activeView.showSubIssues,
+    showWorkspaces:
+      projectState?.draft.showWorkspaces ?? activeView.showWorkspaces,
+  };
+};
 
 const createCustomKanbanViewId = () =>
   `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -232,8 +312,7 @@ type State = {
   // Workspace-specific panel state
   workspacePanelStates: Record<string, WorkspacePanelState>;
 
-  // Kanban filter state
-  kanbanFilters: KanbanFilterState;
+  // Kanban per-project runtime state (saved views + working draft)
   kanbanProjectViewsByProject: Record<string, KanbanProjectViewsState>;
 
   // Workspace sidebar filter state
@@ -242,11 +321,6 @@ type State = {
   // Kanban view mode state
   kanbanViewMode: KanbanViewMode;
   listViewStatusFilter: string | null;
-
-  // Per-project sub-issues visibility
-  showSubIssuesByProject: Record<string, boolean>;
-  // Per-project workspaces visibility on kanban cards
-  showWorkspacesByProject: Record<string, boolean>;
 
   // UI preferences actions
   setRepoAction: (repoId: string, action: RepoAction) => void;
@@ -287,13 +361,17 @@ type State = {
     state: Partial<WorkspacePanelState>
   ) => void;
 
-  // Kanban filter actions
-  setKanbanSearchQuery: (query: string) => void;
-  setKanbanPriorities: (priorities: IssuePriority[]) => void;
-  setKanbanAssignees: (assigneeIds: string[]) => void;
-  setKanbanTags: (tagIds: string[]) => void;
-  setKanbanSort: (field: KanbanSortField, direction: 'asc' | 'desc') => void;
-  clearKanbanFilters: () => void;
+  // Kanban draft/view actions
+  setKanbanSearchQuery: (projectId: string, query: string) => void;
+  setKanbanPriorities: (projectId: string, priorities: IssuePriority[]) => void;
+  setKanbanAssignees: (projectId: string, assigneeIds: string[]) => void;
+  setKanbanTags: (projectId: string, tagIds: string[]) => void;
+  setKanbanSort: (
+    projectId: string,
+    field: KanbanSortField,
+    direction: 'asc' | 'desc'
+  ) => void;
+  clearKanbanFilters: (projectId: string) => void;
   ensureKanbanProjectViews: (projectId: string) => void;
   applyKanbanView: (projectId: string, viewId: string) => void;
   saveCurrentKanbanViewAsNew: (projectId: string, name: string) => void;
@@ -308,11 +386,38 @@ type State = {
   setKanbanViewMode: (mode: KanbanViewMode) => void;
   setListViewStatusFilter: (statusId: string | null) => void;
 
-  // Per-project sub-issues visibility action
+  // Per-project draft display state actions
   setShowSubIssues: (projectId: string, show: boolean) => void;
-  // Per-project workspaces visibility action
   setShowWorkspaces: (projectId: string, show: boolean) => void;
 };
+
+const getOrCreateKanbanProjectViewsState = (
+  states: Record<string, KanbanProjectViewsState>,
+  projectId: string
+): KanbanProjectViewsState =>
+  states[projectId] ?? createDefaultKanbanProjectViewsState();
+
+const updateKanbanProjectViewsState = (
+  states: Record<string, KanbanProjectViewsState>,
+  projectId: string,
+  updater: (state: KanbanProjectViewsState) => KanbanProjectViewsState
+): Record<string, KanbanProjectViewsState> => {
+  const projectState = getOrCreateKanbanProjectViewsState(states, projectId);
+  return {
+    ...states,
+    [projectId]: updater(projectState),
+  };
+};
+
+const updateKanbanProjectDraft = (
+  states: Record<string, KanbanProjectViewsState>,
+  projectId: string,
+  updater: (draft: KanbanProjectDraftState) => KanbanProjectDraftState
+): Record<string, KanbanProjectViewsState> =>
+  updateKanbanProjectViewsState(states, projectId, (projectState) => ({
+    ...projectState,
+    draft: updater(projectState.draft),
+  }));
 
 export const useUiPreferencesStore = create<State>()((set, get) => ({
   // UI preferences state
@@ -333,8 +438,7 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
   // Workspace-specific panel state
   workspacePanelStates: {},
 
-  // Kanban filter state
-  kanbanFilters: DEFAULT_KANBAN_FILTER_STATE,
+  // Kanban per-project runtime state
   kanbanProjectViewsByProject: {},
 
   // Workspace sidebar filter state
@@ -343,11 +447,6 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
   // Kanban view mode state
   kanbanViewMode: 'kanban' as KanbanViewMode,
   listViewStatusFilter: null,
-
-  // Per-project sub-issues visibility (default to shown)
-  showSubIssuesByProject: {},
-  // Per-project workspaces visibility (default to shown)
-  showWorkspacesByProject: {},
 
   // UI preferences actions
   setRepoAction: (repoId, action) =>
@@ -498,37 +597,94 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
     });
   },
 
-  // Kanban filter actions
-  setKanbanSearchQuery: (query) =>
+  // Kanban draft/view actions
+  setKanbanSearchQuery: (projectId, query) =>
     set((s) => ({
-      kanbanFilters: { ...s.kanbanFilters, searchQuery: query },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          filters: {
+            ...draft.filters,
+            searchQuery: query,
+          },
+        })
+      ),
     })),
 
-  setKanbanPriorities: (priorities) =>
+  setKanbanPriorities: (projectId, priorities) =>
     set((s) => ({
-      kanbanFilters: { ...s.kanbanFilters, priorities },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          filters: {
+            ...draft.filters,
+            priorities,
+          },
+        })
+      ),
     })),
 
-  setKanbanAssignees: (assigneeIds) =>
+  setKanbanAssignees: (projectId, assigneeIds) =>
     set((s) => ({
-      kanbanFilters: { ...s.kanbanFilters, assigneeIds },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          filters: {
+            ...draft.filters,
+            assigneeIds,
+          },
+        })
+      ),
     })),
 
-  setKanbanTags: (tagIds) =>
+  setKanbanTags: (projectId, tagIds) =>
     set((s) => ({
-      kanbanFilters: { ...s.kanbanFilters, tagIds },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          filters: {
+            ...draft.filters,
+            tagIds,
+          },
+        })
+      ),
     })),
 
-  setKanbanSort: (field, direction) =>
+  setKanbanSort: (projectId, field, direction) =>
     set((s) => ({
-      kanbanFilters: {
-        ...s.kanbanFilters,
-        sortField: field,
-        sortDirection: direction,
-      },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          filters: {
+            ...draft.filters,
+            sortField: field,
+            sortDirection: direction,
+          },
+        })
+      ),
     })),
 
-  clearKanbanFilters: () => set({ kanbanFilters: DEFAULT_KANBAN_FILTER_STATE }),
+  clearKanbanFilters: (projectId) =>
+    set((s) => ({
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          filters: cloneKanbanFilters(DEFAULT_KANBAN_FILTER_STATE),
+        })
+      ),
+    })),
 
   ensureKanbanProjectViews: (projectId) =>
     set((s) => {
@@ -546,37 +702,30 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
 
   applyKanbanView: (projectId, viewId) =>
     set((s) => {
-      const projectViews =
-        s.kanbanProjectViewsByProject[projectId] ??
-        createDefaultKanbanProjectViewsState();
+      const projectState = getOrCreateKanbanProjectViewsState(
+        s.kanbanProjectViewsByProject,
+        projectId
+      );
       const selectedView =
-        projectViews.views.find((view) => view.id === viewId) ??
-        projectViews.views[0];
+        projectState.views.find((view) => view.id === viewId) ??
+        projectState.views[0];
 
       if (!selectedView) {
         return {
           kanbanProjectViewsByProject: {
             ...s.kanbanProjectViewsByProject,
-            [projectId]: projectViews,
+            [projectId]: projectState,
           },
         };
       }
 
       return {
-        kanbanFilters: cloneKanbanFilters(selectedView.filters),
-        showSubIssuesByProject: {
-          ...s.showSubIssuesByProject,
-          [projectId]: selectedView.showSubIssues,
-        },
-        showWorkspacesByProject: {
-          ...s.showWorkspacesByProject,
-          [projectId]: selectedView.showWorkspaces,
-        },
         kanbanProjectViewsByProject: {
           ...s.kanbanProjectViewsByProject,
           [projectId]: {
-            ...projectViews,
+            ...projectState,
             activeViewId: selectedView.id,
+            draft: createDraftFromView(selectedView),
           },
         },
       };
@@ -589,15 +738,16 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
         return {};
       }
 
-      const projectViews =
-        s.kanbanProjectViewsByProject[projectId] ??
-        createDefaultKanbanProjectViewsState();
+      const projectState = getOrCreateKanbanProjectViewsState(
+        s.kanbanProjectViewsByProject,
+        projectId
+      );
       const newView: KanbanProjectView = {
         id: createCustomKanbanViewId(),
         name: trimmedName,
-        filters: cloneKanbanFilters(s.kanbanFilters),
-        showSubIssues: s.showSubIssuesByProject[projectId] ?? true,
-        showWorkspaces: s.showWorkspacesByProject[projectId] ?? true,
+        filters: cloneKanbanFilters(projectState.draft.filters),
+        showSubIssues: projectState.draft.showSubIssues,
+        showWorkspaces: projectState.draft.showWorkspaces,
       };
 
       return {
@@ -605,7 +755,8 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
           ...s.kanbanProjectViewsByProject,
           [projectId]: {
             activeViewId: newView.id,
-            views: [...projectViews.views, newView],
+            views: [...projectState.views, newView],
+            draft: cloneKanbanProjectDraft(projectState.draft),
           },
         },
       };
@@ -613,10 +764,11 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
 
   overwriteKanbanView: (projectId, viewId) =>
     set((s) => {
-      const projectViews =
-        s.kanbanProjectViewsByProject[projectId] ??
-        createDefaultKanbanProjectViewsState();
-      const hasTargetView = projectViews.views.some(
+      const projectState = getOrCreateKanbanProjectViewsState(
+        s.kanbanProjectViewsByProject,
+        projectId
+      );
+      const hasTargetView = projectState.views.some(
         (view) => view.id === viewId
       );
 
@@ -624,23 +776,21 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
         return {
           kanbanProjectViewsByProject: {
             ...s.kanbanProjectViewsByProject,
-            [projectId]: projectViews,
+            [projectId]: projectState,
           },
         };
       }
 
-      const showSubIssues = s.showSubIssuesByProject[projectId] ?? true;
-      const showWorkspaces = s.showWorkspacesByProject[projectId] ?? true;
-      const updatedViews = projectViews.views.map((view) => {
+      const updatedViews = projectState.views.map((view) => {
         if (view.id !== viewId) {
           return view;
         }
 
         return {
           ...view,
-          filters: cloneKanbanFilters(s.kanbanFilters),
-          showSubIssues,
-          showWorkspaces,
+          filters: cloneKanbanFilters(projectState.draft.filters),
+          showSubIssues: projectState.draft.showSubIssues,
+          showWorkspaces: projectState.draft.showWorkspaces,
         };
       });
 
@@ -650,6 +800,7 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
           [projectId]: {
             activeViewId: viewId,
             views: updatedViews,
+            draft: cloneKanbanProjectDraft(projectState.draft),
           },
         },
       };
@@ -675,22 +826,30 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
   setListViewStatusFilter: (statusId) =>
     set({ listViewStatusFilter: statusId }),
 
-  // Per-project sub-issues visibility action
+  // Per-project draft display state actions
   setShowSubIssues: (projectId, show) =>
     set((s) => ({
-      showSubIssuesByProject: {
-        ...s.showSubIssuesByProject,
-        [projectId]: show,
-      },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          showSubIssues: show,
+        })
+      ),
     })),
 
-  // Per-project workspaces visibility action
+  // Per-project draft display state action
   setShowWorkspaces: (projectId, show) =>
     set((s) => ({
-      showWorkspacesByProject: {
-        ...s.showWorkspacesByProject,
-        [projectId]: show,
-      },
+      kanbanProjectViewsByProject: updateKanbanProjectDraft(
+        s.kanbanProjectViewsByProject,
+        projectId,
+        (draft) => ({
+          ...draft,
+          showWorkspaces: show,
+        })
+      ),
     })),
 }));
 

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import {
   useUiPreferencesStore,
   KANBAN_ASSIGNEE_FILTER_VALUES,
+  resolveKanbanProjectState,
 } from '@/stores/useUiPreferencesStore';
 import type {
   Issue,
@@ -37,11 +38,13 @@ export function useKanbanFilters({
   projectId,
   currentUserId,
 }: UseKanbanFiltersParams): UseKanbanFiltersResult {
-  const kanbanFilters = useUiPreferencesStore((s) => s.kanbanFilters);
-  const showSubIssuesByProject = useUiPreferencesStore(
-    (s) => s.showSubIssuesByProject
+  const projectViewState = useUiPreferencesStore(
+    (s) => s.kanbanProjectViewsByProject[projectId]
   );
-  const showSubIssues = showSubIssuesByProject[projectId] ?? true;
+  const { filters: kanbanFilters, showSubIssues } = useMemo(
+    () => resolveKanbanProjectState(projectViewState),
+    [projectViewState]
+  );
 
   // Create lookup maps for efficient filtering
   const assigneesByIssue = useMemo(() => {

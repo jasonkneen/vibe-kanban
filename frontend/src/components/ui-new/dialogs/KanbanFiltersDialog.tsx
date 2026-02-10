@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   UsersIcon,
@@ -13,8 +13,8 @@ import { cn } from '@/lib/utils';
 import {
   useUiPreferencesStore,
   KANBAN_ASSIGNEE_FILTER_VALUES,
-  DEFAULT_KANBAN_PROJECT_VIEW_ID,
   KANBAN_PROJECT_VIEW_IDS,
+  resolveKanbanProjectState,
   type KanbanSortField,
 } from '@/stores/useUiPreferencesStore';
 import { useAuth } from '@/hooks/auth/useAuth';
@@ -44,6 +44,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui-new/primitives/Dialog';
+import { AssigneeSelectionDialog } from '@/components/ui-new/dialogs/AssigneeSelectionDialog';
 import { PriorityFilterDropdown } from '@/components/ui-new/views/PriorityFilterDropdown';
 import { KanbanDisplaySettingsContainer } from '@/components/ui-new/containers/KanbanDisplaySettingsContainer';
 
@@ -89,14 +90,6 @@ const DEFAULT_VIEW_OPTIONS: PropertyDropdownOption<string>[] = [
   { value: KANBAN_PROJECT_VIEW_IDS.PERSONAL, label: 'Personal' },
 ];
 
-const getUserDisplayName = (user: OrganizationMemberWithProfile): string => {
-  return (
-    [user.first_name, user.last_name].filter(Boolean).join(' ') ||
-    user.username ||
-    'User'
-  );
-};
-
 export function KanbanFiltersDialog({
   open,
   onOpenChange,
@@ -113,7 +106,6 @@ export function KanbanFiltersDialog({
   const { t } = useTranslation('common');
   const { userId } = useAuth();
 
-  const kanbanFilters = useUiPreferencesStore((s) => s.kanbanFilters);
   const projectViewState = useUiPreferencesStore(
     (s) => s.kanbanProjectViewsByProject[projectId]
   );
@@ -131,17 +123,18 @@ export function KanbanFiltersDialog({
   const overwriteKanbanView = useUiPreferencesStore(
     (s) => s.overwriteKanbanView
   );
-  const showSubIssues = useUiPreferencesStore(
-    (s) => s.showSubIssuesByProject[projectId] ?? true
-  );
   const setShowSubIssues = useUiPreferencesStore((s) => s.setShowSubIssues);
-  const showWorkspaces = useUiPreferencesStore(
-    (s) => s.showWorkspacesByProject[projectId] ?? true
-  );
   const setShowWorkspaces = useUiPreferencesStore((s) => s.setShowWorkspaces);
 
-  const activeViewId =
-    projectViewState?.activeViewId ?? DEFAULT_KANBAN_PROJECT_VIEW_ID;
+  const {
+    activeViewId,
+    filters: kanbanFilters,
+    showSubIssues,
+    showWorkspaces,
+  } = useMemo(
+    () => resolveKanbanProjectState(projectViewState),
+    [projectViewState]
+  );
 
   const viewOptions: PropertyDropdownOption<string>[] = useMemo(() => {
     if (!projectViewState || projectViewState.views.length === 0) {
@@ -173,12 +166,19 @@ export function KanbanFiltersDialog({
     overwriteKanbanView(projectId, activeViewId);
   };
 
+  const handleApplyView = useCallback(
+    (viewId: string) => {
+      applyKanbanView(projectId, viewId);
+    },
+    [projectId, applyKanbanView]
+  );
+
   const currentUser = useMemo(
     () => users.find((user) => user.user_id === userId) ?? null,
     [users, userId]
   );
 
-  const assigneeOptions: MultiSelectDropdownOption<string>[] = useMemo(
+  const assigneeDialogOptions = useMemo(
     () => [
       {
         value: KANBAN_ASSIGNEE_FILTER_VALUES.UNASSIGNED,
@@ -204,18 +204,8 @@ export function KanbanFiltersDialog({
           </div>
         ),
       },
-      ...users.map((user) => ({
-        value: user.user_id,
-        label: getUserDisplayName(user),
-        renderOption: () => (
-          <div className="flex items-center gap-base">
-            <UserAvatar user={user} className="h-4 w-4 text-[8px]" />
-            {getUserDisplayName(user)}
-          </div>
-        ),
-      })),
     ],
-    [users, t, currentUser]
+    [t, currentUser]
   );
 
   const tagOptions: MultiSelectDropdownOption<string>[] = useMemo(
@@ -272,6 +262,23 @@ export function KanbanFiltersDialog({
     [usersById, currentUser]
   );
 
+  const handleOpenAssigneeDialog = useCallback(() => {
+    void AssigneeSelectionDialog.show({
+      projectId,
+      issueIds: [],
+      isCreateMode: true,
+      createModeAssigneeIds: kanbanFilters.assigneeIds,
+      onCreateModeAssigneesChange: (assigneeIds: string[]) =>
+        setKanbanAssignees(projectId, assigneeIds),
+      additionalOptions: assigneeDialogOptions,
+    });
+  }, [
+    projectId,
+    kanbanFilters.assigneeIds,
+    setKanbanAssignees,
+    assigneeDialogOptions,
+  ]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[920px] p-0">
@@ -299,7 +306,7 @@ export function KanbanFiltersDialog({
                 <PropertyDropdown
                   value={activeViewId}
                   options={viewOptions}
-                  onChange={(viewId) => applyKanbanView(projectId, viewId)}
+                  onChange={handleApplyView}
                   label={t('kanban.view', 'View')}
                 />
 
@@ -340,24 +347,31 @@ export function KanbanFiltersDialog({
               <div className="flex items-center gap-base flex-wrap">
                 <PriorityFilterDropdown
                   values={kanbanFilters.priorities}
-                  onChange={setKanbanPriorities}
+                  onChange={(priorities) =>
+                    setKanbanPriorities(projectId, priorities)
+                  }
                 />
 
-                <MultiSelectDropdown
-                  values={kanbanFilters.assigneeIds}
-                  options={assigneeOptions}
-                  onChange={setKanbanAssignees}
-                  icon={UsersIcon}
-                  label={t('kanban.assignee', 'Assignee')}
-                  menuLabel={t('kanban.filterByAssignee', 'Filter by assignee')}
-                  renderBadge={renderAssigneeBadge}
-                />
+                <button
+                  type="button"
+                  onClick={handleOpenAssigneeDialog}
+                  className={cn(
+                    'flex items-center gap-half bg-panel rounded-sm',
+                    'text-sm text-normal hover:bg-secondary transition-colors',
+                    'py-half px-base'
+                  )}
+                >
+                  <UsersIcon className="size-icon-xs" weight="bold" />
+                  <span>{t('kanban.assignee', 'Assignee')}</span>
+                  {kanbanFilters.assigneeIds.length > 0 &&
+                    renderAssigneeBadge(kanbanFilters.assigneeIds)}
+                </button>
 
                 {tags.length > 0 && (
                   <MultiSelectDropdown
                     values={kanbanFilters.tagIds}
                     options={tagOptions}
-                    onChange={setKanbanTags}
+                    onChange={(tagIds) => setKanbanTags(projectId, tagIds)}
                     icon={TagIcon}
                     label={t('kanban.tags', 'Tags')}
                     menuLabel={t('kanban.filterByTag', 'Filter by tag')}
@@ -368,7 +382,7 @@ export function KanbanFiltersDialog({
                   value={kanbanFilters.sortField}
                   options={SORT_OPTIONS}
                   onChange={(field: KanbanSortField) =>
-                    setKanbanSort(field, kanbanFilters.sortDirection)
+                    setKanbanSort(projectId, field, kanbanFilters.sortDirection)
                   }
                   icon={
                     kanbanFilters.sortDirection === 'asc'
@@ -383,7 +397,11 @@ export function KanbanFiltersDialog({
                   onClick={() => {
                     const newDirection =
                       kanbanFilters.sortDirection === 'asc' ? 'desc' : 'asc';
-                    setKanbanSort(kanbanFilters.sortField, newDirection);
+                    setKanbanSort(
+                      projectId,
+                      kanbanFilters.sortField,
+                      newDirection
+                    );
                   }}
                   className={cn(
                     'flex items-center justify-center p-half rounded-sm',
@@ -447,7 +465,7 @@ export function KanbanFiltersDialog({
                     variant="tertiary"
                     value={t('kanban.clearFilters', 'Clear all')}
                     actionIcon={XIcon}
-                    onClick={clearKanbanFilters}
+                    onClick={() => clearKanbanFilters(projectId)}
                   />
                 )}
               </div>
