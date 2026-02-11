@@ -127,6 +127,12 @@
         ]
       },
       {
+        "group": "Self-Hosting",
+        "pages": [
+          "self-hosting/local-development"
+        ]
+      },
+      {
         "group": "Integrations",
         "pages": [
           "integrations/github-integration",
