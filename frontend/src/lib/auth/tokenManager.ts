@@ -1,10 +1,14 @@
-import { oauthApi } from '../api';
+import { ApiError, oauthApi } from '../api';
 
 const TOKEN_QUERY_KEY = ['auth', 'token'] as const;
 const TOKEN_STALE_TIME = 125 * 1000; // 125 seconds (slightly longer than the BE stale time)
 
 type RefreshStateCallback = (isRefreshing: boolean) => void;
 type PauseableShape = { pause: () => void; resume: () => void };
+
+function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiError && error.statusCode === 401;
+}
 
 class TokenManager {
   private isRefreshing = false;
@@ -33,7 +37,10 @@ class TokenManager {
         staleTime: TOKEN_STALE_TIME,
       });
       return data?.access_token ?? null;
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        await this.handleUnauthorized();
+      }
       return null;
     }
   }
@@ -111,12 +118,27 @@ class TokenManager {
         this.resumeShapes();
       }
       return token;
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        await this.handleUnauthorized();
+      }
       return null;
     } finally {
       this.refreshPromise = null;
       this.setRefreshing(false);
     }
+  }
+
+  private async handleUnauthorized(): Promise<void> {
+    // Reload system state so the UI transitions to logged-out
+    const { queryClient } = await import('../../main');
+    await queryClient.invalidateQueries({ queryKey: ['user-system'] });
+
+    // Show the login dialog so the user can re-authenticate
+    const { OAuthDialog } = await import(
+      '@/components/dialogs/global/OAuthDialog'
+    );
+    void OAuthDialog.show({});
   }
 
   private setRefreshing(value: boolean): void {
