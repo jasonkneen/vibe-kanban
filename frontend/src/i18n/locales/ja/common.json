@@ -1,4 +1,7 @@
 {
+  "editorNames": {
+    "custom": "カスタム"
+  },
   "folderPicker": {
     "legend": "フォルダ名をクリックして移動 • アクションボタンで選択",
     "manualPathLabel": "パスを手動入力:",
@@ -422,5 +425,17 @@
     "skipSignInHeader": "Don't sign in",
     "yes": "Yes",
     "no": "No"
+  },
+  "migration": {
+    "allProjectsMigrated": "すべてのプロジェクトはすでにクラウドに移行済みです。",
+    "continueToProjects": "プロジェクトに進む"
+  },
+  "appBar": {
+    "kanban": {
+      "tooltip": "カンバン",
+      "title": "カンバンボード",
+      "description": "サインインしてカンバンボードでコーディングエージェントを整理しましょう。",
+      "migrateOldProjects": "古いプロジェクトを移行"
+    }
   }
 }
