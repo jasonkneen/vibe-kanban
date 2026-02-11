@@ -4,13 +4,14 @@ use std::time::Duration;
 
 use api_types::{
     AcceptInvitationResponse, CreateInvitationRequest, CreateInvitationResponse,
-    CreateOrganizationRequest, CreateOrganizationResponse, CreateWorkspaceRequest,
-    DeleteWorkspaceRequest, GetInvitationResponse, GetOrganizationResponse, HandoffInitRequest,
-    HandoffInitResponse, HandoffRedeemRequest, HandoffRedeemResponse, ListInvitationsResponse,
-    ListMembersResponse, ListOrganizationsResponse, Organization, ProfileResponse,
-    RevokeInvitationRequest, TokenRefreshRequest, TokenRefreshResponse, UpdateMemberRoleRequest,
-    UpdateMemberRoleResponse, UpdateOrganizationRequest, UpdateWorkspaceRequest,
-    UpsertPullRequestRequest,
+    CreateIssueRequest, CreateOrganizationRequest, CreateOrganizationResponse,
+    CreateWorkspaceRequest, DeleteResponse, DeleteWorkspaceRequest, GetInvitationResponse,
+    GetOrganizationResponse, HandoffInitRequest, HandoffInitResponse, HandoffRedeemRequest,
+    HandoffRedeemResponse, Issue, ListInvitationsResponse, ListIssuesResponse, ListMembersResponse,
+    ListOrganizationsResponse, ListProjectStatusesResponse, ListProjectsResponse, MutationResponse,
+    Organization, ProfileResponse, RevokeInvitationRequest, TokenRefreshRequest,
+    TokenRefreshResponse, UpdateIssueRequest, UpdateMemberRoleRequest, UpdateMemberRoleResponse,
+    UpdateOrganizationRequest, UpdateWorkspaceRequest, UpsertPullRequestRequest, Workspace,
 };
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Duration as ChronoDuration;
@@ -557,6 +558,15 @@ impl RemoteClient {
         .await
     }
 
+    /// Gets a workspace from the remote server by its local workspace ID.
+    pub async fn get_workspace_by_local_id(
+        &self,
+        local_workspace_id: Uuid,
+    ) -> Result<Workspace, RemoteClientError> {
+        self.get_authed(&format!("/v1/workspaces/by-local-id/{local_workspace_id}"))
+            .await
+    }
+
     /// Checks if a workspace exists on the remote server.
     pub async fn workspace_exists(
         &self,
@@ -618,6 +628,87 @@ impl RemoteClient {
         .await?;
         Ok(())
     }
+
+    // ── Issues ──────────────────────────────────────────────────────────
+
+    /// Lists issues for a project.
+    pub async fn list_issues(
+        &self,
+        project_id: Uuid,
+    ) -> Result<ListIssuesResponse, RemoteClientError> {
+        self.get_authed(&format!("/v1/issues?project_id={project_id}"))
+            .await
+    }
+
+    /// Gets a single issue by ID.
+    pub async fn get_issue(&self, issue_id: Uuid) -> Result<Issue, RemoteClientError> {
+        self.get_authed(&format!("/v1/issues/{issue_id}")).await
+    }
+
+    /// Creates a new issue.
+    pub async fn create_issue(
+        &self,
+        request: &CreateIssueRequest,
+    ) -> Result<MutationResponse<Issue>, RemoteClientError> {
+        self.post_authed("/v1/issues", Some(request)).await
+    }
+
+    /// Updates an existing issue.
+    pub async fn update_issue(
+        &self,
+        issue_id: Uuid,
+        request: &UpdateIssueRequest,
+    ) -> Result<MutationResponse<Issue>, RemoteClientError> {
+        self.patch_authed(&format!("/v1/issues/{issue_id}"), request)
+            .await
+    }
+
+    /// Deletes an issue.
+    pub async fn delete_issue(&self, issue_id: Uuid) -> Result<DeleteResponse, RemoteClientError> {
+        let res = self
+            .send(
+                reqwest::Method::DELETE,
+                &format!("/v1/issues/{issue_id}"),
+                true,
+                None::<&()>,
+            )
+            .await?;
+        res.json::<DeleteResponse>()
+            .await
+            .map_err(|e| RemoteClientError::Serde(e.to_string()))
+    }
+
+    // ── Remote Projects ─────────────────────────────────────────────────
+
+    /// Gets a single remote project by ID.
+    pub async fn get_remote_project(
+        &self,
+        project_id: Uuid,
+    ) -> Result<api_types::Project, RemoteClientError> {
+        self.get_authed(&format!("/v1/projects/{project_id}")).await
+    }
+
+    /// Lists projects for an organization.
+    pub async fn list_remote_projects(
+        &self,
+        organization_id: Uuid,
+    ) -> Result<ListProjectsResponse, RemoteClientError> {
+        self.get_authed(&format!("/v1/projects?organization_id={organization_id}"))
+            .await
+    }
+
+    // ── Project Statuses ────────────────────────────────────────────────
+
+    /// Lists project statuses for a project (used for status name ↔ UUID mapping).
+    pub async fn list_project_statuses(
+        &self,
+        project_id: Uuid,
+    ) -> Result<ListProjectStatusesResponse, RemoteClientError> {
+        self.get_authed(&format!("/v1/project_statuses?project_id={project_id}"))
+            .await
+    }
+
+    // ── Pull Requests ───────────────────────────────────────────────────
 
     /// Upserts a pull request on the remote server.
     /// Creates if not exists, updates if exists.

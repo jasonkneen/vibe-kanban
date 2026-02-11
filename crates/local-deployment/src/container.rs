@@ -1189,21 +1189,7 @@ impl ContainerService for LocalContainerService {
             commit_reminder_prompt,
         );
 
-        // Load task and project context for environment variables
-        let task = workspace
-            .parent_task(&self.db.pool)
-            .await?
-            .ok_or(ContainerError::Other(anyhow!(
-                "Task not found for workspace"
-            )))?;
-        let project = task
-            .parent_project(&self.db.pool)
-            .await?
-            .ok_or(ContainerError::Other(anyhow!("Project not found for task")))?;
-
-        env.insert("VK_PROJECT_NAME", &project.name);
-        env.insert("VK_PROJECT_ID", project.id.to_string());
-        env.insert("VK_TASK_ID", task.id.to_string());
+        // Always inject workspace/session context
         env.insert("VK_WORKSPACE_ID", workspace.id.to_string());
         env.insert("VK_WORKSPACE_BRANCH", &workspace.branch);
         env.insert("VK_SESSION_ID", execution_process.session_id.to_string());
