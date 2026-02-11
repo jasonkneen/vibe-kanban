@@ -1,10 +1,5 @@
-import {
-  createContext,
-  useContext,
-  useMemo,
-  useCallback,
-  type ReactNode,
-} from 'react';
+import { useContext, useMemo, useCallback, type ReactNode } from 'react';
+import { createHmrContext } from '@/lib/hmrContext.ts';
 import {
   useShape,
   type InsertResult,
@@ -146,7 +141,10 @@ export interface ProjectContextValue {
   tagsById: Map<string, Tag>;
 }
 
-const ProjectContext = createContext<ProjectContextValue | null>(null);
+const ProjectContext = createHmrContext<ProjectContextValue | null>(
+  'RemoteProjectContext',
+  null
+);
 
 interface ProjectProviderProps {
   projectId: string;
