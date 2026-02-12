@@ -7,10 +7,11 @@ use api_types::{
     CreateIssueRequest, CreateOrganizationRequest, CreateOrganizationResponse,
     CreateWorkspaceRequest, DeleteResponse, DeleteWorkspaceRequest, GetInvitationResponse,
     GetOrganizationResponse, HandoffInitRequest, HandoffInitResponse, HandoffRedeemRequest,
-    HandoffRedeemResponse, Issue, ListInvitationsResponse, ListIssuesResponse, ListMembersResponse,
-    ListOrganizationsResponse, ListProjectStatusesResponse, ListProjectsResponse, MutationResponse,
-    Organization, ProfileResponse, RevokeInvitationRequest, TokenRefreshRequest,
-    TokenRefreshResponse, UpdateIssueRequest, UpdateMemberRoleRequest, UpdateMemberRoleResponse,
+    HandoffRedeemResponse, Issue, ListAttachmentsResponse, ListInvitationsResponse,
+    ListIssuesResponse, ListMembersResponse, ListOrganizationsResponse,
+    ListProjectStatusesResponse, ListProjectsResponse, MutationResponse, Organization,
+    ProfileResponse, RevokeInvitationRequest, TokenRefreshRequest, TokenRefreshResponse,
+    UpdateIssueRequest, UpdateMemberRoleRequest, UpdateMemberRoleResponse,
     UpdateOrganizationRequest, UpdateWorkspaceRequest, UpsertPullRequestRequest, Workspace,
 };
 use backon::{ExponentialBuilder, Retryable};
@@ -724,6 +725,31 @@ impl RemoteClient {
         )
         .await?;
         Ok(())
+    }
+
+    /// Lists attachments for an issue on the remote server.
+    pub async fn list_issue_attachments(
+        &self,
+        issue_id: Uuid,
+    ) -> Result<ListAttachmentsResponse, RemoteClientError> {
+        self.get_authed(&format!("/v1/issues/{issue_id}/attachments"))
+            .await
+    }
+
+    /// Used for fetching from presigned Azure SAS URLs.
+    pub async fn download_from_url(&self, url: &str) -> Result<Vec<u8>, RemoteClientError> {
+        let res = self.http.get(url).send().await.map_err(map_reqwest_error)?;
+        if !res.status().is_success() {
+            return Err(RemoteClientError::Http {
+                status: res.status().as_u16(),
+                body: res.text().await.unwrap_or_default(),
+            });
+        }
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| RemoteClientError::Transport(e.to_string()))?;
+        Ok(bytes.to_vec())
     }
 }
 
