@@ -25,7 +25,7 @@ use crate::{
         ActionType, FileChange, NormalizedEntry, NormalizedEntryError, NormalizedEntryType,
         TodoItem, ToolStatus,
         plain_text_processor::PlainTextLogProcessor,
-        utils::{ConversationPatch, EntryIndexProvider},
+        utils::{ConversationPatch, EntryIndexProvider, shell_command_parsing::CommandCategory},
     },
 };
 
@@ -419,6 +419,7 @@ impl StandardCodingAgentExecutor for CursorAgent {
                                         exit_status,
                                         output,
                                     }),
+                                    category: CommandCategory::from_command(&args.command),
                                 };
                             } else if let CursorToolCall::Mcp { args, result } = &tool_call {
                                 // Extract a human-readable text from content array using typed deserialization
@@ -811,6 +812,7 @@ impl CursorToolCall {
                     ActionType::CommandRun {
                         command: cmd.clone(),
                         result: None,
+                        category: CommandCategory::from_command(cmd),
                     },
                     cmd.to_string(),
                 )

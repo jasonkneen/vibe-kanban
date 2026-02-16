@@ -45,6 +45,7 @@ use crate::{
         utils::{
             EntryIndexProvider,
             patch::{self, ConversationPatch},
+            shell_command_parsing::CommandCategory,
         },
     },
     stdout_dup::create_stdout_pipe_writer,
@@ -796,6 +797,7 @@ impl ClaudeLogProcessor {
             ClaudeToolData::Bash { command, .. } => ActionType::CommandRun {
                 command: command.clone(),
                 result: None,
+                category: CommandCategory::from_command(command),
             },
             ClaudeToolData::Grep { pattern, .. } => ActionType::Search {
                 query: pattern.clone(),
@@ -1177,6 +1179,7 @@ impl ClaudeLogProcessor {
                                     action_type: ActionType::CommandRun {
                                         command: info.content.clone(),
                                         result,
+                                        category: CommandCategory::from_command(&info.content),
                                     },
                                     status,
                                 },
