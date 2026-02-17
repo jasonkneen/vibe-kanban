@@ -90,20 +90,15 @@ impl StandardCodingAgentExecutor for QaMockExecutor {
         self.spawn(current_dir, prompt, env).await
     }
 
-    fn normalize_logs(
-        &self,
-        msg_store: Arc<MsgStore>,
-        current_dir: &Path,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    fn normalize_logs(&self, msg_store: Arc<MsgStore>, current_dir: &Path) {
         // Reuse Claude's log processor since we output ClaudeJson format
         let entry_index_provider = EntryIndexProvider::start_from(&msg_store);
-        let h1 = crate::executors::claude::ClaudeLogProcessor::process_logs(
+        crate::executors::claude::ClaudeLogProcessor::process_logs(
             msg_store,
             current_dir,
             entry_index_provider,
             crate::executors::claude::HistoryStrategy::Default,
         );
-        vec![h1]
     }
 
     fn default_mcp_config_path(&self) -> Option<std::path::PathBuf> {

@@ -171,17 +171,13 @@ impl StandardCodingAgentExecutor for CursorAgent {
         Ok(child.into())
     }
 
-    fn normalize_logs(
-        &self,
-        msg_store: Arc<MsgStore>,
-        worktree_path: &Path,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    fn normalize_logs(&self, msg_store: Arc<MsgStore>, worktree_path: &Path) {
         let entry_index_provider = EntryIndexProvider::start_from(&msg_store);
 
         // Custom stderr processor for Cursor that detects login errors
         let msg_store_stderr = msg_store.clone();
         let entry_index_provider_stderr = entry_index_provider.clone();
-        let h1 = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut stderr = msg_store_stderr.stderr_chunked_stream();
             let mut processor = PlainTextLogProcessor::builder()
                 .normalized_entry_producer(Box::new(|content: String| {
@@ -225,7 +221,7 @@ impl StandardCodingAgentExecutor for CursorAgent {
 
         // Process Cursor stdout JSONL with typed serde models
         let current_dir = worktree_path.to_path_buf();
-        let h2 = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut lines = msg_store.stdout_lines_stream();
 
             // Assistant streaming coalescer state
@@ -513,8 +509,6 @@ impl StandardCodingAgentExecutor for CursorAgent {
                 }
             }
         });
-
-        vec![h1, h2]
     }
 
     fn default_mcp_config_path(&self) -> Option<std::path::PathBuf> {
