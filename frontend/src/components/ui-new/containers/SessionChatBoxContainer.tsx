@@ -18,7 +18,8 @@ import { useReviewOptional } from '@/contexts/ReviewProvider';
 import { useActions } from '@/contexts/ActionsContext';
 import { useTodos } from '@/hooks/useTodos';
 import { getLatestConfigFromProcesses } from '@/utils/executor';
-import { useExecutorConfig } from '@/hooks/useExecutorConfig';
+import { useLocalExecutorConfig } from '@/hooks/useLocalExecutorConfig';
+import { usePresetOptions } from '@/hooks/usePresetOptions';
 import { useSessionMessageEditor } from '@/hooks/useSessionMessageEditor';
 import { useSessionQueueInteraction } from '@/hooks/useSessionQueueInteraction';
 import { useSessionSend } from '@/hooks/useSessionSend';
@@ -315,7 +316,6 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
   const {
     localMessage,
     setLocalMessage,
-    scratchData,
     isScratchLoading,
     hasInitialValue,
     saveToScratch,
@@ -365,24 +365,35 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
     noKeyboard: true,
   });
 
-  // Unified executor + variant + model selector options resolution
+  const lockedExecutor = useMemo<BaseCodingAgent | null>(() => {
+    if (needsExecutorSelection) return null;
+    return (
+      latestConfig?.executor ??
+      (session?.executor as BaseCodingAgent | undefined) ??
+      null
+    );
+  }, [needsExecutorSelection, latestConfig?.executor, session?.executor]);
+
+  // Local executor + variant state with preference defaults.
   const {
     executorConfig,
     effectiveExecutor,
     selectedVariant,
     executorOptions,
     variantOptions,
-    presetOptions,
     setExecutor: handleExecutorChange,
     setVariant: setSelectedVariant,
     setOverrides: setExecutorOverrides,
-  } = useExecutorConfig({
+  } = useLocalExecutorConfig({
     profiles,
-    lastUsedConfig: latestConfig,
-    scratchConfig: scratchData?.executor_config ?? undefined,
-    configExecutorProfile: config?.executor_profile,
-    onPersist: (cfg) => void saveToScratch(localMessageRef.current, cfg),
+    preferredProfile: config?.executor_profile,
+    lockedExecutor,
+    resetKey: scratchId,
   });
+  const { data: presetOptions } = usePresetOptions(
+    effectiveExecutor,
+    selectedVariant
+  );
 
   // Navigate to agent settings to customise variants
   const handleCustomise = () => {
@@ -471,7 +482,7 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
     const { prompt } = buildAgentPrompt(localMessage, [reviewMarkdown]);
 
     cancelDebouncedSave();
-    await saveToScratch(localMessage, executorConfig);
+    await saveToScratch(localMessage);
     await queueMessage(prompt, executorConfig);
 
     // Clear local state after queueing (same as handleSend)
@@ -494,22 +505,10 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
   const handleEditorChange = useCallback(
     (value: string) => {
       if (isQueued) cancelQueue();
-      if (executorConfig) {
-        handleMessageChange(value, executorConfig);
-      } else {
-        setLocalMessage(value);
-      }
+      handleMessageChange(value);
       if (sendError) clearError();
     },
-    [
-      isQueued,
-      cancelQueue,
-      handleMessageChange,
-      executorConfig,
-      sendError,
-      clearError,
-      setLocalMessage,
-    ]
+    [isQueued, cancelQueue, handleMessageChange, sendError, clearError]
   );
 
   // Handle feedback submission

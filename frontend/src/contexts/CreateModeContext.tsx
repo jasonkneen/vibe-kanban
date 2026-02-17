@@ -1,6 +1,6 @@
 import { useContext, useMemo, type ReactNode } from 'react';
 import { createHmrContext } from '@/lib/hmrContext.ts';
-import type { Repo, ExecutorConfig } from 'shared/types';
+import type { ExecutorConfig, Repo } from 'shared/types';
 import {
   useCreateModeState,
   type CreateModeInitialState,
@@ -25,6 +25,7 @@ interface CreateModeContextValue {
   clearRepos: () => void;
   targetBranches: Record<string, string | null>;
   setTargetBranch: (repoId: string, branch: string) => void;
+  preferredExecutorConfig: ExecutorConfig | null;
   message: string;
   setMessage: (message: string) => void;
   clearDraft: () => Promise<void>;
@@ -34,10 +35,6 @@ interface CreateModeContextValue {
   linkedIssue: LinkedIssue | null;
   /** Clear the linked issue */
   clearLinkedIssue: () => void;
-  /** Persisted executor config (model selector state) */
-  executorConfig: ExecutorConfig | null;
-  /** Update executor config (triggers debounced scratch save) */
-  setExecutorConfig: (config: ExecutorConfig | null) => void;
 }
 
 const CreateModeContext = createHmrContext<CreateModeContextValue | null>(
@@ -56,7 +53,7 @@ export function CreateModeProvider({
   initialState,
   draftId,
 }: CreateModeProviderProps) {
-  // Fetch most recent workspace to seed project selection only
+  // Fetch most recent workspace to seed create-mode defaults
   const {
     workspaces: activeWorkspaces,
     archivedWorkspaces,
@@ -99,14 +96,13 @@ export function CreateModeProvider({
       clearRepos: state.clearRepos,
       targetBranches: state.targetBranches,
       setTargetBranch: state.setTargetBranch,
+      preferredExecutorConfig: state.preferredExecutorConfig,
       message: state.message,
       setMessage: state.setMessage,
       clearDraft: state.clearDraft,
       hasInitialValue: state.hasInitialValue,
       linkedIssue: state.linkedIssue,
       clearLinkedIssue: state.clearLinkedIssue,
-      executorConfig: state.executorConfig,
-      setExecutorConfig: state.setExecutorConfig,
     }),
     [
       state.selectedProjectId,
@@ -117,14 +113,13 @@ export function CreateModeProvider({
       state.clearRepos,
       state.targetBranches,
       state.setTargetBranch,
+      state.preferredExecutorConfig,
       state.message,
       state.setMessage,
       state.clearDraft,
       state.hasInitialValue,
       state.linkedIssue,
       state.clearLinkedIssue,
-      state.executorConfig,
-      state.setExecutorConfig,
     ]
   );
 
