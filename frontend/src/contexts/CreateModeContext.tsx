@@ -1,5 +1,4 @@
 import { useContext, useMemo, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { createHmrContext } from '@/lib/hmrContext.ts';
 import type { Repo, ExecutorConfig } from 'shared/types';
 import {
@@ -7,9 +6,8 @@ import {
   type CreateModeInitialState,
 } from '@/hooks/useCreateModeState';
 import { useWorkspaces } from '@/components/ui-new/hooks/useWorkspaces';
+import { useUserContext } from '@/contexts/remote/UserContext';
 import { useTask } from '@/hooks/useTask';
-import { useAttemptRepo } from '@/hooks/useAttemptRepo';
-import { repoApi } from '@/lib/api';
 
 interface LinkedIssue {
   issueId: string;
@@ -58,47 +56,37 @@ export function CreateModeProvider({
   initialState,
   draftId,
 }: CreateModeProviderProps) {
-  // Fetch most recent workspace to use as initial values
-  const { workspaces: activeWorkspaces, archivedWorkspaces } = useWorkspaces();
+  // Fetch most recent workspace to seed project selection only
+  const {
+    workspaces: activeWorkspaces,
+    archivedWorkspaces,
+    isLoading: localWorkspacesLoading,
+  } = useWorkspaces();
+  const { workspaces: remoteWorkspaces, isLoading: remoteWorkspacesLoading } =
+    useUserContext();
   const mostRecentWorkspace = activeWorkspaces[0] ?? archivedWorkspaces[0];
+  const localWorkspaceIds = useMemo(
+    () =>
+      new Set([
+        ...activeWorkspaces.map((workspace) => workspace.id),
+        ...archivedWorkspaces.map((workspace) => workspace.id),
+      ]),
+    [activeWorkspaces, archivedWorkspaces]
+  );
 
   const { data: lastWorkspaceTask } = useTask(mostRecentWorkspace?.taskId, {
     enabled: !!mostRecentWorkspace?.taskId,
   });
 
-  // Primary source: repos from the most recent workspace
-  const { repos: lastWorkspaceRepos, isLoading: workspaceReposLoading } =
-    useAttemptRepo(mostRecentWorkspace?.id, {
-      enabled: !!mostRecentWorkspace?.id,
-    });
-
-  // Fallback: recently-used repos from the server (for new users with no workspaces)
-  const hasWorkspace = !!mostRecentWorkspace;
-  const { data: recentRepos, isLoading: recentReposLoading } = useQuery({
-    queryKey: ['recentReposForCreate'],
-    queryFn: () => repoApi.listRecent(),
-    enabled: !hasWorkspace,
-  });
-
-  const reposLoading = hasWorkspace
-    ? workspaceReposLoading
-    : recentReposLoading;
-
-  const initialRepos = useMemo(() => {
-    // Use last workspace repos if available
-    if (hasWorkspace) return lastWorkspaceRepos;
-    // Fall back to first recent repo for new users
-    if (!recentRepos || recentRepos.length === 0) return [];
-    const repo = recentRepos[0];
-    return [{ ...repo, target_branch: '' }];
-  }, [hasWorkspace, lastWorkspaceRepos, recentRepos]);
-
   const state = useCreateModeState({
     initialProjectId: lastWorkspaceTask?.project_id,
-    // Pass undefined while loading to prevent premature initialization
-    initialRepos: reposLoading ? undefined : initialRepos,
     initialState,
     draftId,
+    lastWorkspaceId: mostRecentWorkspace?.id ?? null,
+    remoteWorkspaces,
+    localWorkspaceIds,
+    localWorkspacesLoading,
+    remoteWorkspacesLoading,
   });
 
   const value = useMemo<CreateModeContextValue>(
