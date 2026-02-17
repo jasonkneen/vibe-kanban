@@ -48,7 +48,9 @@ import {
   CheckEditorAvailabilityResponse,
   AvailabilityInfo,
   BaseCodingAgent,
-  ExecutorProfileId,
+  ExecutorConfig,
+  DraftFollowUpData,
+  AgentPresetOptionsQuery,
   RunAgentSetupRequest,
   RunAgentSetupResponse,
   GhCliSetupError,
@@ -1396,7 +1398,7 @@ export const scratchApi = {
 
 // Agents API
 export const agentsApi = {
-  getSlashCommandsStreamUrl: (
+  getDiscoveredOptionsStreamUrl: (
     agent: BaseCodingAgent,
     opts?: { workspaceId?: string; repoId?: string }
   ): string => {
@@ -1405,7 +1407,19 @@ export const agentsApi = {
     if (opts?.workspaceId) params.set('workspace_id', opts.workspaceId);
     if (opts?.repoId) params.set('repo_id', opts.repoId);
 
-    return `/api/agents/slash-commands/ws?${params.toString()}`;
+    return `/api/agents/discovered-options/ws?${params.toString()}`;
+  },
+
+  getPresetOptions: async (
+    query: AgentPresetOptionsQuery
+  ): Promise<ExecutorConfig> => {
+    const params = new URLSearchParams();
+    params.set('executor', query.executor);
+    if (query.variant) params.set('variant', query.variant);
+    const response = await makeRequest(
+      `/api/agents/preset-options?${params.toString()}`
+    );
+    return handleApiResponse<ExecutorConfig>(response);
   },
 };
 
@@ -1416,7 +1430,7 @@ export const queueApi = {
    */
   queue: async (
     sessionId: string,
-    data: { message: string; executor_profile_id: ExecutorProfileId }
+    data: DraftFollowUpData
   ): Promise<QueueStatus> => {
     const response = await makeRequest(`/api/sessions/${sessionId}/queue`, {
       method: 'POST',

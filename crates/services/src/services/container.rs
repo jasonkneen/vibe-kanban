@@ -43,7 +43,7 @@ use executors::{
             patch::{convert_replace_to_add, is_add_or_replace, patch_entry_path},
         },
     },
-    profile::ExecutorProfileId,
+    profile::{ExecutorConfig, ExecutorProfileId},
 };
 use futures::{StreamExt, future, stream::BoxStream};
 use git::{GitService, GitServiceError};
@@ -104,13 +104,13 @@ pub trait ContainerService {
 
     fn workspace_to_current_dir(&self, workspace: &Workspace) -> PathBuf;
 
-    async fn available_agent_slash_commands(
+    async fn discover_executor_options(
         &self,
         executor_profile_id: ExecutorProfileId,
         workspace_id: Option<Uuid>,
         repo_id: Option<Uuid>,
     ) -> Result<Option<BoxStream<'static, Patch>>, ContainerError> {
-        let agent_workdir = if let Some(workspace_id) = workspace_id {
+        let (workdir, repo_path) = if let Some(workspace_id) = workspace_id {
             let workspace = Workspace::find_by_id(&self.db().pool, workspace_id)
                 .await?
                 .ok_or(SqlxError::RowNotFound)?;
@@ -125,34 +125,51 @@ pub trait ContainerService {
             }
 
             let workspace_path = PathBuf::from(container_ref);
-            match workspace.agent_working_dir.as_deref() {
+            let workdir = match workspace.agent_working_dir.as_deref() {
                 Some(dir) if !dir.is_empty() => Some(workspace_path.join(dir)),
                 _ => Some(workspace_path),
-            }
+            };
+
+            let repos = WorkspaceRepo::find_repos_for_workspace(&self.db().pool, workspace_id)
+                .await
+                .unwrap_or_default();
+            let repo_path = if repos.len() == 1 {
+                Some(repos[0].path.clone())
+            } else {
+                None
+            };
+
+            (workdir, repo_path)
         } else if let Some(repo_id) = repo_id {
-            Repo::find_by_id(&self.db().pool, repo_id)
+            let repo = Repo::find_by_id(&self.db().pool, repo_id)
                 .await
                 .ok()
                 .flatten()
-                .map(|repo| repo.path)
+                .map(|repo| repo.path);
+            (None, repo)
         } else {
-            None
-        }
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            (None, None)
+        };
 
         #[cfg(feature = "qa-mode")]
         {
             let _ = executor_profile_id;
-            let agent = QaMockExecutor;
-            let stream = agent.available_slash_commands(&agent_workdir).await?;
-            return Ok(Some(stream));
+            let _ = workdir;
+            let _ = repo_path;
+            return Ok(None);
         }
         #[cfg(not(feature = "qa-mode"))]
         {
             let executor =
                 ExecutorConfigs::get_cached().get_coding_agent_or_default(&executor_profile_id);
 
-            let stream = executor.available_slash_commands(&agent_workdir).await?;
+            // Spawn background task to refresh global cache for this executor
+            let base_agent = executors::executors::BaseCodingAgent::from(&executor);
+            executors::executors::utils::spawn_global_cache_refresh_for_agent(base_agent);
+
+            let stream = executor
+                .discover_options(workdir.as_deref(), repo_path.as_deref())
+                .await?;
             Ok(Some(stream))
         }
     }
@@ -968,7 +985,7 @@ pub trait ContainerService {
                     #[cfg(not(feature = "qa-mode"))]
                     {
                         let executor = ExecutorConfigs::get_cached()
-                            .get_coding_agent_or_default(&request.executor_profile_id);
+                            .get_coding_agent_or_default(&request.executor_config.profile_id());
                         executor.normalize_logs(
                             temp_store.clone(),
                             &request.effective_dir(&current_dir),
@@ -987,7 +1004,7 @@ pub trait ContainerService {
                     #[cfg(not(feature = "qa-mode"))]
                     {
                         let executor = ExecutorConfigs::get_cached()
-                            .get_coding_agent_or_default(&request.executor_profile_id);
+                            .get_coding_agent_or_default(&request.executor_config.profile_id());
                         executor.normalize_logs(
                             temp_store.clone(),
                             &request.effective_dir(&current_dir),
@@ -1002,7 +1019,7 @@ pub trait ContainerService {
                 #[cfg(not(feature = "qa-mode"))]
                 ExecutorActionType::ReviewRequest(request) => {
                     let executor = ExecutorConfigs::get_cached()
-                        .get_coding_agent_or_default(&request.executor_profile_id);
+                        .get_coding_agent_or_default(&request.executor_config.profile_id());
                     executor.normalize_logs(temp_store.clone(), &current_dir)
                 }
                 _ => {
@@ -1176,7 +1193,7 @@ pub trait ContainerService {
     async fn start_workspace(
         &self,
         workspace: &Workspace,
-        executor_profile_id: ExecutorProfileId,
+        executor_config: ExecutorConfig,
     ) -> Result<ExecutionProcess, ContainerError> {
         // Create container
         self.create(workspace).await?;
@@ -1197,7 +1214,7 @@ pub trait ContainerService {
         let session = Session::create(
             &self.db().pool,
             &CreateSession {
-                executor: Some(executor_profile_id.executor.to_string()),
+                executor: Some(executor_config.executor.to_string()),
             },
             Uuid::new_v4(),
             workspace.id,
@@ -1221,7 +1238,7 @@ pub trait ContainerService {
         let coding_action = ExecutorAction::new(
             ExecutorActionType::CodingAgentInitialRequest(CodingAgentInitialRequest {
                 prompt,
-                executor_profile_id: executor_profile_id.clone(),
+                executor_config: executor_config.clone(),
                 working_dir,
             }),
             cleanup_action.map(Box::new),
@@ -1417,15 +1434,15 @@ pub trait ContainerService {
         if let Some(msg_store) = self.get_msg_store_by_id(&execution_process.id).await
             && let Some((executor_profile_id, working_dir)) = match executor_action.typ() {
                 ExecutorActionType::CodingAgentInitialRequest(request) => Some((
-                    &request.executor_profile_id,
+                    request.executor_config.profile_id(),
                     request.effective_dir(&workspace_root),
                 )),
                 ExecutorActionType::CodingAgentFollowUpRequest(request) => Some((
-                    &request.executor_profile_id,
+                    request.executor_config.profile_id(),
                     request.effective_dir(&workspace_root),
                 )),
                 ExecutorActionType::ReviewRequest(request) => Some((
-                    &request.executor_profile_id,
+                    request.executor_config.profile_id(),
                     request.effective_dir(&workspace_root),
                 )),
                 _ => None,
@@ -1439,7 +1456,7 @@ pub trait ContainerService {
             #[cfg(not(feature = "qa-mode"))]
             {
                 if let Some(executor) =
-                    ExecutorConfigs::get_cached().get_coding_agent(executor_profile_id)
+                    ExecutorConfigs::get_cached().get_coding_agent(&executor_profile_id)
                 {
                     let _ = executor.normalize_logs(msg_store, &working_dir);
                 } else {
