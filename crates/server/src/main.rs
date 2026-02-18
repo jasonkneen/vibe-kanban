@@ -52,6 +52,19 @@ async fn main() -> Result<(), VibeKanbanError> {
         std::fs::create_dir_all(asset_dir())?;
     }
 
+    // Copy old database to new location for safe downgrades
+    let old_db = asset_dir().join("db.sqlite");
+    let new_db = asset_dir().join("db.v2.sqlite");
+    if !new_db.exists() && old_db.exists() {
+        tracing::info!(
+            "Copying database to new location: {:?} -> {:?}",
+            old_db,
+            new_db
+        );
+        std::fs::copy(&old_db, &new_db).expect("Failed to copy database file");
+        tracing::info!("Database copy complete");
+    }
+
     let deployment = DeploymentImpl::new().await?;
     deployment.update_sentry_scope().await?;
     deployment
@@ -72,24 +85,10 @@ async fn main() -> Result<(), VibeKanbanError> {
     deployment
         .track_if_analytics_allowed("session_start", serde_json::json!({}))
         .await;
-
-    // Pre-warm file search cache for most active projects
-    let deployment_for_cache = deployment.clone();
-    tokio::spawn(async move {
-        if let Err(e) = deployment_for_cache
-            .file_search_cache()
-            .warm_most_active(&deployment_for_cache.db().pool, 3)
-            .await
-        {
-            tracing::warn!("Failed to warm file search cache: {}", e);
-        }
-    });
-
     // Preload global executor options cache for all executors with DEFAULT presets
     tokio::spawn(async move {
         executors::executors::utils::preload_global_executor_options_cache().await;
     });
-
     let app_router = routes::router(deployment.clone());
 
     let port = std::env::var("BACKEND_PORT")
