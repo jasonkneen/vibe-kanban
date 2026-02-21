@@ -47,6 +47,8 @@ export function CreateChatBoxContainer({
     preferredExecutorConfig,
     executorConfig: draftConfig,
     setExecutorConfig: setDraftConfig,
+    images: draftImages,
+    setImages: setDraftImages,
   } = useCreateMode();
 
   const { createWorkspace } = useCreateWorkspace();
@@ -82,8 +84,8 @@ export function CreateChatBoxContainer({
     [message, setMessage]
   );
 
-  const { uploadFiles, clearAttachments, localImages } =
-    useCreateAttachments(handleInsertMarkdown);
+  const { uploadFiles, getImageIds, clearAttachments, localImages } =
+    useCreateAttachments(handleInsertMarkdown, draftImages, setDraftImages);
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -231,6 +233,7 @@ export function CreateChatBoxContainer({
             issue_id: linkedIssue.issueId,
           }
         : null,
+      image_ids: getImageIds(),
     };
     const linkToIssue = linkedIssue
       ? {
@@ -259,6 +262,7 @@ export function CreateChatBoxContainer({
     targetBranches,
     createWorkspace,
     onWorkspaceCreated,
+    getImageIds,
     clearAttachments,
     clearDraft,
     linkedIssue,
