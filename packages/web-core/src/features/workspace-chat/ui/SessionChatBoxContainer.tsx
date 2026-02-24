@@ -3,10 +3,11 @@ import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
 import {
+  type AskUserQuestionItem,
   BaseAgentCapability,
   type Session,
-  type ToolStatus,
   type BaseCodingAgent,
+  ExecutionProcessStatus,
 } from 'shared/types';
 import { AgentIcon } from '@/shared/components/AgentIcon';
 import { useAttemptExecution } from '@/shared/hooks/useAttemptExecution';
@@ -30,6 +31,7 @@ import { useMessageEditRetry } from '../model/hooks/useMessageEditRetry';
 import { useBranchStatus } from '@/shared/hooks/useBranchStatus';
 import { useAttemptBranch } from '../model/hooks/useAttemptBranch';
 import { useApprovalMutation } from '../model/hooks/useApprovalMutation';
+import { useApprovals } from '@/shared/hooks/useApprovals';
 import { ResolveConflictsDialog } from '@/shared/dialogs/tasks/ResolveConflictsDialog';
 import { workspaceSummaryKeys } from '@/shared/hooks/workspaceSummaryKeys';
 import { buildAgentPrompt } from '@/shared/lib/promptMessage';
@@ -183,28 +185,45 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
   const { entries } = useEntries();
   const tokenUsageInfo = useTokenUsage();
 
-  // Extract pending approval metadata from entries (needed for scratchId)
+  // Execution state
+  const { isAttemptRunning, stopExecution, isStopping, processes } =
+    useAttemptExecution(workspaceId);
+
+  // Approvals state
+  const { getPendingForProcess } = useApprovals();
+
+  // Get pending approval from running processes
   const pendingApproval = useMemo(() => {
-    for (const entry of entries) {
-      if (entry.type !== 'NORMALIZED_ENTRY') continue;
-      const entryType = entry.content.entry_type;
-      if (
-        entryType.type === 'tool_use' &&
-        entryType.status.status === 'pending_approval'
-      ) {
-        const status = entryType.status as Extract<
-          ToolStatus,
-          { status: 'pending_approval' }
-        >;
+    const runningProcesses = processes.filter(
+      (p) => p.status === ExecutionProcessStatus.running
+    );
+    for (const proc of runningProcesses) {
+      const info = getPendingForProcess(proc.id);
+      if (info) {
+        let questions: AskUserQuestionItem[] | undefined;
+        for (const entry of entries) {
+          if (entry.type !== 'NORMALIZED_ENTRY') continue;
+          const entryType = entry.content.entry_type;
+          if (
+            entryType.type === 'tool_use' &&
+            entryType.status.status === 'pending_approval' &&
+            entryType.status.approval_id === info.approval_id &&
+            entryType.action_type.action === 'ask_user_question'
+          ) {
+            questions = entryType.action_type.questions;
+            break;
+          }
+        }
         return {
-          approvalId: status.approval_id,
-          timeoutAt: status.timeout_at,
-          executionProcessId: entry.executionProcessId,
+          approvalId: info.approval_id,
+          timeoutAt: info.timeout_at,
+          executionProcessId: info.execution_process_id,
+          questions,
         };
       }
     }
     return null;
-  }, [entries]);
+  }, [processes, getPendingForProcess, entries]);
 
   // Use approval_id as scratch key when pending approval exists to avoid
   // prefilling approval response with queued follow-up message
@@ -214,10 +233,6 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
     }
     return isNewSessionMode ? workspaceId : sessionId;
   }, [pendingApproval?.approvalId, isNewSessionMode, workspaceId, sessionId]);
-
-  // Execution state
-  const { isAttemptRunning, stopExecution, isStopping, processes } =
-    useAttemptExecution(workspaceId);
 
   // Get repos for file search
   const { repos } = useAttemptRepo(workspaceId);
@@ -242,9 +257,17 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
   );
   const hasReviewComments = (reviewContext?.comments.length ?? 0) > 0;
 
-  // Approval mutation for approve/deny actions
-  const { approveAsync, denyAsync, isApproving, isDenying, denyError } =
-    useApprovalMutation();
+  // Approval mutation for approve/deny/answer actions
+  const {
+    approveAsync,
+    denyAsync,
+    answerAsync,
+    isApproving,
+    isDenying,
+    isAnswering,
+    denyError,
+    answerError,
+  } = useApprovalMutation();
 
   // Branch status for edit retry and conflict detection
   const { data: branchStatus } = useBranchStatus(workspaceId);
@@ -768,6 +791,28 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
     onScrollToBottom,
   ]);
 
+  // Handle AskUserQuestion answer submission
+  const handleAnswerQuestion = useCallback(
+    async (answers: Array<{ question: string; answer: string[] }>) => {
+      if (!pendingApproval) return;
+
+      try {
+        await answerAsync({
+          approvalId: pendingApproval.approvalId,
+          executionProcessId: pendingApproval.executionProcessId,
+          answers,
+        });
+        queryClient.invalidateQueries({
+          queryKey: workspaceSummaryKeys.all,
+        });
+        onScrollToBottom();
+      } catch {
+        // Error is handled by mutation
+      }
+    },
+    [pendingApproval, answerAsync, queryClient, onScrollToBottom]
+  );
+
   // Check if approval is timed out
   const isApprovalTimedOut = pendingApproval
     ? new Date() > new Date(pendingApproval.timeoutAt)
@@ -974,7 +1019,7 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
           : undefined
       }
       approvalMode={
-        pendingApproval
+        pendingApproval && !pendingApproval.questions
           ? {
               isActive: true,
               onApprove: handleApprove,
@@ -982,6 +1027,18 @@ export function SessionChatBoxContainer(props: SessionChatBoxContainerProps) {
               isSubmitting: isApproving || isDenying,
               isTimedOut: isApprovalTimedOut,
               error: denyError?.message ?? null,
+            }
+          : undefined
+      }
+      askQuestionMode={
+        pendingApproval?.questions
+          ? {
+              isActive: true,
+              questions: pendingApproval.questions,
+              onSubmitAnswers: handleAnswerQuestion,
+              isSubmitting: isAnswering,
+              isTimedOut: isApprovalTimedOut,
+              error: answerError?.message ?? null,
             }
           : undefined
       }
