@@ -28,6 +28,7 @@ import { MemberListItem } from '@/shared/components/org/MemberListItem';
 import { PendingInvitationItem } from '@/shared/components/org/PendingInvitationItem';
 import type { MemberRole } from 'shared/types';
 import { MemberRole as MemberRoleEnum } from 'shared/types';
+import { ApiError, organizationsApi } from '@/shared/lib/api';
 import { cn } from '@/shared/lib/utils';
 import { getRemoteApiUrl } from '@/shared/lib/remoteApi';
 import { PrimaryButton } from '@vibe/ui/components/PrimaryButton';
@@ -45,6 +46,7 @@ export function OrganizationsSettingsSection() {
   const { isSignedIn, isLoaded, userId } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isOpeningBilling, setIsOpeningBilling] = useState(false);
 
   // Fetch all organizations
   const {
@@ -198,6 +200,68 @@ export function OrganizationsSettingsSection() {
     deleteOrganization.mutate(selectedOrgId);
   };
 
+  const handleManageBilling = async () => {
+    if (!selectedOrgId || isOpeningBilling) {
+      return;
+    }
+
+    // Open tab immediately so browsers treat it as user-initiated.
+    const stripeTab = window.open('', '_blank');
+    setError(null);
+    setIsOpeningBilling(true);
+
+    try {
+      const returnUrl = window.location.href;
+      const billingStatus =
+        await organizationsApi.getBillingStatus(selectedOrgId);
+
+      const createCheckoutUrl = async () => {
+        const { url: checkoutUrl } =
+          await organizationsApi.createCheckoutSession(
+            selectedOrgId,
+            returnUrl,
+            returnUrl
+          );
+        return checkoutUrl;
+      };
+
+      const url = await (async () => {
+        if (billingStatus.status === 'requires_subscription') {
+          return createCheckoutUrl();
+        }
+
+        try {
+          const { url: portalUrl } = await organizationsApi.createPortalSession(
+            selectedOrgId,
+            returnUrl
+          );
+          return portalUrl;
+        } catch (err) {
+          if (
+            err instanceof ApiError &&
+            (err.statusCode === 402 || err.statusCode === 503)
+          ) {
+            return createCheckoutUrl();
+          }
+
+          throw err;
+        }
+      })();
+
+      if (stripeTab) {
+        stripeTab.opener = null;
+        stripeTab.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      stripeTab?.close();
+      setError(err instanceof Error ? err.message : 'Failed to open billing');
+    } finally {
+      setIsOpeningBilling(false);
+    }
+  };
+
   if (!isLoaded || orgsLoading) {
     return (
       <div className="flex items-center justify-center py-8 gap-2">
@@ -316,38 +380,37 @@ export function OrganizationsSettingsSection() {
       </SettingsCard>
 
       {/* Pending Invitations (admin only) */}
-      {selectedOrg && isAdmin && !isPersonalOrg && (
-        <SettingsCard
-          title={t('invitationList.title')}
-          description={t('invitationList.description', {
-            orgName: selectedOrg.name,
-          })}
-        >
-          {loadingInvitations ? (
-            <div className="flex items-center justify-center py-4 gap-2">
-              <SpinnerIcon className="size-icon-sm animate-spin" />
-              <span className="text-sm text-low">
-                {t('invitationList.loading')}
-              </span>
-            </div>
-          ) : invitations.length === 0 ? (
-            <div className="text-center py-4 text-sm text-low">
-              {t('invitationList.none')}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {invitations.map((invitation) => (
-                <PendingInvitationItem
-                  key={invitation.id}
-                  invitation={invitation}
-                  onRevoke={handleRevokeInvitation}
-                  isRevoking={revokeInvitation.isPending}
-                />
-              ))}
-            </div>
-          )}
-        </SettingsCard>
-      )}
+      {selectedOrg &&
+        isAdmin &&
+        !isPersonalOrg &&
+        (loadingInvitations || invitations.length > 0) && (
+          <SettingsCard
+            title={t('invitationList.title')}
+            description={t('invitationList.description', {
+              orgName: selectedOrg.name,
+            })}
+          >
+            {loadingInvitations ? (
+              <div className="flex items-center justify-center py-4 gap-2">
+                <SpinnerIcon className="size-icon-sm animate-spin" />
+                <span className="text-sm text-low">
+                  {t('invitationList.loading')}
+                </span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {invitations.map((invitation) => (
+                  <PendingInvitationItem
+                    key={invitation.id}
+                    invitation={invitation}
+                    onRevoke={handleRevokeInvitation}
+                    isRevoking={revokeInvitation.isPending}
+                  />
+                ))}
+              </div>
+            )}
+          </SettingsCard>
+        )}
 
       {/* Members */}
       {selectedOrg && (
@@ -424,7 +487,7 @@ export function OrganizationsSettingsSection() {
         </SettingsCard>
       )}
 
-      {/* Billing Link (admin only, non-personal orgs, when remote URL is configured) */}
+      {/* Billing CTA (admin only, non-personal orgs, when remote URL is configured) */}
       {selectedOrg && isAdmin && !isPersonalOrg && getRemoteApiUrl() && (
         <SettingsCard
           title={t('billing.title')}
@@ -432,19 +495,23 @@ export function OrganizationsSettingsSection() {
         >
           <div className="flex items-center justify-between">
             <p className="text-sm text-low">{t('billing.openInBrowser')}</p>
-            <a
-              href={`${getRemoteApiUrl()}/account/organizations/${selectedOrgId}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => void handleManageBilling()}
+              disabled={isOpeningBilling}
               className={cn(
                 'flex items-center gap-2 px-base py-half rounded-sm text-sm font-medium',
                 'bg-brand/10 text-brand hover:bg-brand/20 border border-brand/50',
-                'transition-colors'
+                'transition-colors disabled:cursor-not-allowed disabled:opacity-50'
               )}
             >
-              <ArrowSquareOutIcon className="size-icon-xs" weight="bold" />
+              {isOpeningBilling ? (
+                <SpinnerIcon className="size-icon-xs animate-spin" />
+              ) : (
+                <ArrowSquareOutIcon className="size-icon-xs" weight="bold" />
+              )}
               {t('billing.manageButton')}
-            </a>
+            </button>
           </div>
         </SettingsCard>
       )}
