@@ -1,6 +1,7 @@
 import {
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useState,
   type ReactNode,
@@ -19,91 +20,118 @@ interface TypeaheadPlacement {
   top: number;
 }
 
-const VIEWPORT_PADDING = 16;
-const MENU_SIDE_OFFSET = 8;
-const MAX_MENU_HEIGHT = 360;
-const MAX_MENU_WIDTH = 370;
-const MIN_RENDERED_MENU_HEIGHT = 96;
-const FLIP_HYSTERESIS_PX = 72;
-
 function getViewportHeight() {
   return window.visualViewport?.height ?? window.innerHeight;
 }
 
-function getAvailableVerticalSpace(anchorRect: DOMRect, editorRect?: DOMRect) {
-  const viewportHeight = getViewportHeight();
-  // When an editor rect is available, measure space above the entire editor
-  // input so the menu doesn't overlap earlier lines of text.
-  const topEdge = editorRect ? editorRect.top : anchorRect.top;
-  return {
-    above: topEdge - VIEWPORT_PADDING - MENU_SIDE_OFFSET,
-    below:
-      viewportHeight - anchorRect.bottom - VIEWPORT_PADDING - MENU_SIDE_OFFSET,
-  };
+function getViewportWidth() {
+  return window.visualViewport?.width ?? window.innerWidth;
 }
 
-function chooseInitialSide(above: number, below: number): VerticalSide {
-  return below >= above ? 'bottom' : 'top';
+function parseLength(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function chooseStableSide(
-  previousSide: VerticalSide | undefined,
-  above: number,
-  below: number
-): VerticalSide {
-  if (!previousSide) {
-    return chooseInitialSide(above, below);
-  }
+function resolveLineHeight(
+  style: CSSStyleDeclaration,
+  fallbackHeight: number
+): number {
+  const explicit = parseLength(style.lineHeight);
+  if (explicit > 0) return explicit;
 
-  if (previousSide === 'bottom') {
-    const shouldFlipToTop =
-      below < MIN_RENDERED_MENU_HEIGHT && above > below + FLIP_HYSTERESIS_PX;
-    return shouldFlipToTop ? 'top' : 'bottom';
-  }
+  const fontSize = parseLength(style.fontSize);
+  if (fontSize > 0) return fontSize;
 
-  const shouldFlipToBottom =
-    above < MIN_RENDERED_MENU_HEIGHT && below > above + FLIP_HYSTERESIS_PX;
-  return shouldFlipToBottom ? 'bottom' : 'top';
+  return Math.max(fallbackHeight, 0);
 }
 
-function clampMenuHeight(height: number) {
-  return Math.min(
-    MAX_MENU_HEIGHT,
-    Math.max(MIN_RENDERED_MENU_HEIGHT, Math.floor(height))
+function round(value: number): number {
+  return Math.round(value);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function placementsEqual(
+  a: TypeaheadPlacement,
+  b: TypeaheadPlacement
+): boolean {
+  return (
+    a.side === b.side &&
+    a.left === b.left &&
+    a.top === b.top &&
+    a.maxHeight === b.maxHeight
   );
 }
 
-function getPlacement(
+function computePlacement(
   anchorEl: HTMLElement,
-  previousSide?: VerticalSide,
+  menuEl: HTMLElement,
   editorEl?: HTMLElement | null
 ): TypeaheadPlacement {
   const anchorRect = anchorEl.getBoundingClientRect();
+  const menuRect = menuEl.getBoundingClientRect();
   const editorRect = editorEl?.getBoundingClientRect();
-  const { above, below } = getAvailableVerticalSpace(anchorRect, editorRect);
-  const side = chooseStableSide(previousSide, above, below);
-  const rawHeight = side === 'bottom' ? below : above;
+  const anchorStyles = window.getComputedStyle(anchorEl);
+  const menuStyles = window.getComputedStyle(menuEl);
+  const viewportWidth = getViewportWidth();
+  const viewportHeight = getViewportHeight();
+  const marginTop = parseLength(menuStyles.marginTop);
+  const marginBottom = parseLength(menuStyles.marginBottom);
+  const marginLeft = parseLength(menuStyles.marginLeft);
+  const marginRight = parseLength(menuStyles.marginRight);
+  const configuredMinHeight = parseLength(menuStyles.minHeight);
+  const configuredMaxHeight = parseLength(menuStyles.maxHeight);
+  const measuredHeight = round(
+    menuRect.height ||
+      parseLength(menuStyles.height) ||
+      parseLength(menuStyles.minHeight)
+  );
 
-  // Horizontal: align to anchor left, but shift left if it would overflow
-  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-  const rightOverflow =
-    anchorRect.left + MAX_MENU_WIDTH - viewportWidth + VIEWPORT_PADDING;
-  const left =
-    rightOverflow > 0 ? anchorRect.left - rightOverflow : anchorRect.left;
+  const lineHeight = resolveLineHeight(anchorStyles, anchorRect.height);
+  const cursorTopBoundary = anchorRect.top - lineHeight;
+  const topBoundary = editorRect
+    ? Math.max(editorRect.top, cursorTopBoundary)
+    : cursorTopBoundary;
+  const aboveSpace = topBoundary - marginBottom;
+  const belowSpace = viewportHeight - anchorRect.bottom - marginTop;
+  const side: VerticalSide =
+    belowSpace >= measuredHeight || belowSpace >= aboveSpace ? 'bottom' : 'top';
+  const availableSpace = Math.max(
+    side === 'bottom' ? belowSpace : aboveSpace,
+    0
+  );
 
-  // Vertical: below the anchor or above the editor (if available)
-  let top: number;
-  if (side === 'bottom') {
-    top = anchorRect.bottom + MENU_SIDE_OFFSET;
-  } else {
-    // Position above the editor top edge (or anchor if no editor)
-    const topEdge = editorRect ? editorRect.top : anchorRect.top;
-    top = topEdge - MENU_SIDE_OFFSET;
+  let maxHeight = configuredMaxHeight
+    ? Math.min(configuredMaxHeight, availableSpace)
+    : availableSpace;
+  if (configuredMinHeight) {
+    maxHeight = Math.max(
+      maxHeight,
+      Math.min(configuredMinHeight, availableSpace)
+    );
   }
+
+  const measuredWidth =
+    round(menuRect.width) ||
+    round(parseLength(menuStyles.width)) ||
+    round(parseLength(menuStyles.minWidth));
+  const minLeft = marginLeft;
+  const maxLeft = Math.max(
+    minLeft,
+    viewportWidth - measuredWidth - marginRight
+  );
+  const left = clamp(round(anchorRect.left), round(minLeft), round(maxLeft));
+  const top =
+    side === 'bottom'
+      ? round(anchorRect.bottom + marginTop)
+      : round(topBoundary - marginBottom);
 
   return {
     side,
-    maxHeight: clampMenuHeight(rawHeight),
+    maxHeight: round(maxHeight),
     left,
     top,
   };
@@ -123,35 +151,29 @@ function TypeaheadMenuRoot({
   children,
 }: TypeaheadMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<TypeaheadPlacement>(() =>
-    getPlacement(anchorEl, undefined, editorEl)
-  );
+  const [placement, setPlacement] = useState<TypeaheadPlacement | null>(null);
 
   const syncPlacement = useCallback(() => {
+    const menuEl = menuRef.current;
+    if (!menuEl) return;
+
+    const nextPlacement = computePlacement(anchorEl, menuEl, editorEl);
     setPlacement((previous) => {
-      const next = getPlacement(anchorEl, previous.side, editorEl);
-      const maxHeightStable =
-        Math.abs(next.maxHeight - previous.maxHeight) < 10;
-      const leftStable = Math.abs(next.left - previous.left) < 2;
-      // Use a line-height–sized tolerance for vertical position so that
-      // sub-pixel anchor movements within the same line don't cause updates.
-      // The position only needs to change on line wraps (~20px jump).
-      const topStable = Math.abs(next.top - previous.top) < 10;
-      if (
-        next.side === previous.side &&
-        maxHeightStable &&
-        leftStable &&
-        topStable
-      ) {
+      if (previous && placementsEqual(previous, nextPlacement)) {
         return previous;
       }
-      return next;
+
+      return nextPlacement;
     });
   }, [anchorEl, editorEl]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     syncPlacement();
+    const frameId = window.requestAnimationFrame(syncPlacement);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [syncPlacement]);
 
+  useEffect(() => {
     const updateOnFrame = () => {
       window.requestAnimationFrame(syncPlacement);
     };
@@ -172,7 +194,26 @@ function TypeaheadMenuRoot({
         vv.removeEventListener('scroll', updateOnFrame);
       }
     };
-  }, [anchorEl, syncPlacement]);
+  }, [syncPlacement]);
+
+  useEffect(() => {
+    const menuEl = menuRef.current;
+    if (!menuEl) return;
+
+    const observer = new ResizeObserver(() => {
+      syncPlacement();
+    });
+
+    observer.observe(anchorEl);
+    observer.observe(menuEl);
+    if (editorEl) {
+      observer.observe(editorEl);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [anchorEl, editorEl, syncPlacement]);
 
   // Click-outside detection
   useEffect(() => {
@@ -189,8 +230,12 @@ function TypeaheadMenuRoot({
 
   // When side is 'top' the menu grows upward — use bottom-anchored positioning
   // so the menu expands upward from a fixed bottom edge.
-  const style =
-    placement.side === 'bottom'
+  const style: CSSProperties = !placement
+    ? {
+        position: 'fixed',
+        visibility: 'hidden',
+      }
+    : placement.side === 'bottom'
       ? ({
           position: 'fixed',
           left: placement.left,
@@ -207,8 +252,8 @@ function TypeaheadMenuRoot({
   return (
     <div
       ref={menuRef}
-      style={style as CSSProperties}
-      className="z-[10000] w-auto min-w-80 max-w-[370px] p-0 overflow-hidden bg-panel border border-border rounded-sm shadow-md flex flex-col"
+      style={style}
+      className="z-[10000] w-auto min-w-80 max-w-full p-0 overflow-hidden bg-panel border border-border rounded-sm shadow-md flex flex-col"
     >
       {children}
     </div>
@@ -237,7 +282,7 @@ function TypeaheadMenuScrollArea({ children }: { children: ReactNode }) {
   return (
     <div
       className="py-half overflow-auto flex-1 min-h-0"
-      style={{ maxHeight: 'var(--typeahead-menu-max-height, 360px)' }}
+      style={{ maxHeight: 'var(--typeahead-menu-max-height, 100vh)' }}
     >
       {children}
     </div>
