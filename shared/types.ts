@@ -286,6 +286,20 @@ export type AgentPresetOptionsQuery = { executor: BaseCodingAgent, variant: stri
 
 export type CurrentUserResponse = { user_id: string, };
 
+export type StartSpake2EnrollmentRequest = { enrollment_code: string, client_message_b64: string, };
+
+export type FinishSpake2EnrollmentRequest = { enrollment_id: string, client_id: string, client_name: string, client_browser: string, client_os: string, client_device: string, public_key_b64: string, client_proof_b64: string, };
+
+export type StartSpake2EnrollmentResponse = { enrollment_id: string, server_message_b64: string, };
+
+export type FinishSpake2EnrollmentResponse = { signing_session_id: string, server_public_key_b64: string, server_proof_b64: string, };
+
+export type RelayPairedClient = { client_id: string, client_name: string, client_browser: string, client_os: string, client_device: string, };
+
+export type ListRelayPairedClientsResponse = { clients: Array<RelayPairedClient>, };
+
+export type RemoveRelayPairedClientResponse = { removed: boolean, };
+
 export type CreateFollowUpAttempt = { prompt: string, executor_config: ExecutorConfig, retry_process_id: string | null, force_when_dirty: boolean | null, perform_git_reset: boolean | null, };
 
 export type ResetProcessRequest = { process_id: string, force_when_dirty: boolean | null, perform_git_reset: boolean | null, };
@@ -452,7 +466,7 @@ export type DirectoryListResponse = { entries: Array<DirectoryEntry>, current_pa
 
 export type SearchMode = "taskform" | "settings";
 
-export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, remote_onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut, };
+export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, remote_onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut, relay_enabled: boolean, };
 
 export type NotificationConfig = { sound_enabled: boolean, push_enabled: boolean, sound_file: SoundFile, };
 

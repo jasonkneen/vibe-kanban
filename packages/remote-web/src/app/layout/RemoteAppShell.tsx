@@ -2,16 +2,19 @@ import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { siDiscord, siGithub } from "simple-icons";
-import { AppBar } from "@vibe/ui/components/AppBar";
+import { AppBar, type AppBarHostStatus } from "@vibe/ui/components/AppBar";
 import type { Project } from "shared/remote-types";
 import { useUserOrganizations } from "@/shared/hooks/useUserOrganizations";
 import { useAuth } from "@/shared/hooks/auth/useAuth";
 import { useOrganizationStore } from "@/shared/stores/useOrganizationStore";
 import { useDiscordOnlineCount } from "@/shared/hooks/useDiscordOnlineCount";
 import { useGitHubStars } from "@/shared/hooks/useGitHubStars";
+import { SettingsDialog } from "@/shared/dialogs/settings/SettingsDialog";
 import { listOrganizationProjects } from "@remote/shared/lib/api";
 import { RemoteAppBarUserPopoverContainer } from "@remote/app/layout/RemoteAppBarUserPopoverContainer";
 import { RemoteNavbarContainer } from "@remote/app/layout/RemoteNavbarContainer";
+import { useRelayAppBarHosts } from "@remote/shared/hooks/useRelayAppBarHosts";
+import { REMOTE_SETTINGS_SECTIONS } from "@remote/shared/constants/settings";
 import {
   CreateOrganizationDialog,
   type CreateOrganizationResult,
@@ -20,6 +23,11 @@ import {
   CreateRemoteProjectDialog,
   type CreateRemoteProjectResult,
 } from "@/shared/dialogs/org/CreateRemoteProjectDialog";
+import {
+  getActiveRelayHostId,
+  parseRelayHostIdFromSearch,
+  setActiveRelayHostId,
+} from "@remote/shared/lib/activeRelayHost";
 
 interface RemoteAppShellProps {
   children: ReactNode;
@@ -88,17 +96,43 @@ export function RemoteAppShell({ children }: RemoteAppShellProps) {
 
   const { data: onlineCount } = useDiscordOnlineCount();
   const { data: starCount } = useGitHubStars();
+  const { hosts: relayHosts } = useRelayAppBarHosts(isSignedIn);
 
   const selectedOrgName =
     organizations.find((organization) => organization.id === selectedOrgId)
       ?.name ?? null;
 
   const isWorkspacesActive = location.pathname.startsWith("/workspaces");
+  const hostIdFromSearch = useMemo(
+    () => parseRelayHostIdFromSearch(location.searchStr),
+    [location.searchStr],
+  );
+
+  useEffect(() => {
+    if (hostIdFromSearch) {
+      setActiveRelayHostId(hostIdFromSearch);
+    }
+  }, [hostIdFromSearch]);
+
+  const activeHostId = useMemo(() => {
+    if (!isWorkspacesActive) {
+      return null;
+    }
+
+    return hostIdFromSearch ?? getActiveRelayHostId();
+  }, [hostIdFromSearch, isWorkspacesActive]);
+
   const activeProjectId = location.pathname.startsWith("/projects/")
     ? (location.pathname.split("/")[2] ?? null)
     : null;
 
   const handleWorkspacesClick = useCallback(() => {
+    const currentHostId = getActiveRelayHostId();
+    if (currentHostId) {
+      navigate({ to: "/workspaces", search: { hostId: currentHostId } });
+      return;
+    }
+
     navigate({ to: "/workspaces" });
   }, [navigate]);
 
@@ -148,12 +182,39 @@ export function RemoteAppShell({ children }: RemoteAppShellProps) {
     }
   }, [setSelectedOrgId]);
 
+  const handleHostClick = useCallback(
+    (hostId: string, status: AppBarHostStatus) => {
+      if (status === "online") {
+        setActiveRelayHostId(hostId);
+        navigate({
+          to: "/workspaces",
+          search: { hostId },
+        });
+        return;
+      }
+
+      if (status !== "unpaired") {
+        return;
+      }
+
+      void SettingsDialog.show({
+        initialSection: "relay",
+        initialState: { hostId },
+        sections: REMOTE_SETTINGS_SECTIONS,
+      });
+    },
+    [navigate],
+  );
+
   return (
     <div className="flex h-screen bg-primary">
       <AppBar
         projects={projects}
+        hosts={relayHosts}
+        activeHostId={activeHostId}
         onCreateProject={handleCreateProject}
         onWorkspacesClick={handleWorkspacesClick}
+        onHostClick={handleHostClick}
         showWorkspacesButton={false}
         onProjectClick={handleProjectClick}
         onProjectsDragEnd={() => {}}

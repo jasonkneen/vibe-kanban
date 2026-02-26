@@ -3,14 +3,18 @@ import type {
   AttachmentWithBlob,
   CommitAttachmentsRequest,
   CommitAttachmentsResponse,
+  CreateRelaySessionResponse,
   ConfirmUploadRequest,
   InitUploadRequest,
   InitUploadResponse,
+  ListRelayHostsResponse,
+  RelayHost,
   UpdateIssueRequest,
   UpdateProjectRequest,
   UpdateProjectStatusRequest,
 } from 'shared/remote-types';
 import { getAuthRuntime } from '@/shared/lib/auth/runtime';
+import { syncRelayApiBaseWithRemote } from '@/shared/lib/relayBackendApi';
 
 const BUILD_TIME_API_BASE = import.meta.env.VITE_VK_SHARED_API_BASE || '';
 
@@ -26,6 +30,7 @@ let _remoteApiBase: string = BUILD_TIME_API_BASE;
 export function setRemoteApiBase(base: string | null | undefined) {
   if (base) {
     _remoteApiBase = base;
+    syncRelayApiBaseWithRemote(base);
   }
 }
 
@@ -45,6 +50,15 @@ export const makeRequest = async (
   options: RequestInit = {},
   retryOn401 = true
 ): Promise<Response> => {
+  return makeAuthenticatedRequest(getRemoteApiUrl(), path, options, retryOn401);
+};
+
+async function makeAuthenticatedRequest(
+  baseUrl: string,
+  path: string,
+  options: RequestInit = {},
+  retryOn401 = true
+): Promise<Response> {
   const authRuntime = getAuthRuntime();
   const token = await authRuntime.getToken();
   if (!token) {
@@ -59,7 +73,7 @@ export const makeRequest = async (
   headers.set('X-Client-Version', __APP_VERSION__);
   headers.set('X-Client-Type', 'frontend');
 
-  const response = await fetch(`${getRemoteApiUrl()}${path}`, {
+  const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers,
     credentials: 'include',
@@ -71,7 +85,7 @@ export const makeRequest = async (
     if (newToken) {
       // Retry the request with the new token
       headers.set('Authorization', `Bearer ${newToken}`);
-      return fetch(`${getRemoteApiUrl()}${path}`, {
+      return fetch(`${baseUrl}${path}`, {
         ...options,
         headers,
         credentials: 'include',
@@ -82,7 +96,7 @@ export const makeRequest = async (
   }
 
   return response;
-};
+}
 
 export interface BulkUpdateIssueItem {
   id: string;
@@ -142,6 +156,34 @@ export async function bulkUpdateProjectStatuses(
     const error = await response.json();
     throw new Error(error.message || 'Failed to bulk update project statuses');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Relay host API functions (served by remote backend)
+// ---------------------------------------------------------------------------
+
+export async function listRelayHosts(): Promise<RelayHost[]> {
+  const response = await makeRequest('/v1/hosts', { method: 'GET' });
+  if (!response.ok) {
+    throw await parseErrorResponse(response, 'Failed to list relay hosts');
+  }
+
+  const body = (await response.json()) as ListRelayHostsResponse;
+  return body.hosts;
+}
+
+export async function createRelaySession(
+  hostId: string
+): Promise<CreateRelaySessionResponse['session']> {
+  const response = await makeRequest(`/v1/hosts/${hostId}/sessions`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw await parseErrorResponse(response, 'Failed to create relay session');
+  }
+
+  const body = (await response.json()) as CreateRelaySessionResponse;
+  return body.session;
 }
 
 // ---------------------------------------------------------------------------

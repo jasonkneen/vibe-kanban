@@ -14,10 +14,7 @@ use anyhow;
 use api_types::{CreateWorkspaceRequest, PullRequestStatus, UpsertPullRequestRequest};
 use axum::{
     Extension, Json, Router,
-    extract::{
-        Path as AxumPath, Query, State,
-        ws::{WebSocket, WebSocketUpgrade},
-    },
+    extract::{Path as AxumPath, Query, State, ws::Message},
     http::StatusCode,
     middleware::from_fn_with_state,
     response::{IntoResponse, Json as ResponseJson},
@@ -60,8 +57,13 @@ use utils::response::ApiResponse;
 use uuid::Uuid;
 
 use crate::{
-    DeploymentImpl, error::ApiError, middleware::load_workspace_middleware,
-    routes::task_attempts::gh_cli_setup::GhCliSetupError,
+    DeploymentImpl,
+    error::ApiError,
+    middleware::load_workspace_middleware,
+    routes::{
+        relay_ws::{SignedWebSocket, SignedWsUpgrade},
+        task_attempts::gh_cli_setup::GhCliSetupError,
+    },
 };
 
 #[derive(Debug, Deserialize, Serialize, TS)]
@@ -224,7 +226,7 @@ pub async fn run_agent_setup(
 
 #[axum::debug_handler]
 pub async fn stream_task_attempt_diff_ws(
-    ws: WebSocketUpgrade,
+    ws: SignedWsUpgrade,
     Query(params): Query<DiffStreamQuery>,
     Extension(workspace): Extension<Workspace>,
     State(deployment): State<DeploymentImpl>,
@@ -240,12 +242,12 @@ pub async fn stream_task_attempt_diff_ws(
 }
 
 async fn handle_task_attempt_diff_ws(
-    socket: WebSocket,
+    mut socket: SignedWebSocket,
     deployment: DeploymentImpl,
     workspace: Workspace,
     stats_only: bool,
 ) -> anyhow::Result<()> {
-    use futures_util::{SinkExt, StreamExt, TryStreamExt};
+    use futures_util::{StreamExt, TryStreamExt};
     use utils::log_msg::LogMsg;
 
     let stream = deployment
@@ -255,15 +257,13 @@ async fn handle_task_attempt_diff_ws(
 
     let mut stream = stream.map_ok(|msg: LogMsg| msg.to_ws_message_unchecked());
 
-    let (mut sender, mut receiver) = socket.split();
-
     loop {
         tokio::select! {
             // Wait for next stream item
             item = stream.next() => {
                 match item {
                     Some(Ok(msg)) => {
-                        if sender.send(msg).await.is_err() {
+                        if socket.send(msg).await.is_err() {
                             break;
                         }
                     }
@@ -275,9 +275,12 @@ async fn handle_task_attempt_diff_ws(
                 }
             }
             // Detect client disconnection
-            msg = receiver.next() => {
-                if msg.is_none() {
-                    break;
+            msg = socket.recv() => {
+                match msg {
+                    Ok(Some(Message::Close(_))) => break,
+                    Ok(Some(_)) => {}
+                    Ok(None) => break,
+                    Err(_) => break,
                 }
             }
         }
@@ -286,7 +289,7 @@ async fn handle_task_attempt_diff_ws(
 }
 
 pub async fn stream_workspaces_ws(
-    ws: WebSocketUpgrade,
+    ws: SignedWsUpgrade,
     Query(query): Query<WorkspaceStreamQuery>,
     State(deployment): State<DeploymentImpl>,
 ) -> impl IntoResponse {
@@ -299,12 +302,12 @@ pub async fn stream_workspaces_ws(
 }
 
 async fn handle_workspaces_ws(
-    socket: WebSocket,
+    mut socket: SignedWebSocket,
     deployment: DeploymentImpl,
     archived: Option<bool>,
     limit: Option<i64>,
 ) -> anyhow::Result<()> {
-    use futures_util::{SinkExt, StreamExt, TryStreamExt};
+    use futures_util::{StreamExt, TryStreamExt};
 
     let mut stream = deployment
         .events()
@@ -312,14 +315,12 @@ async fn handle_workspaces_ws(
         .await?
         .map_ok(|msg| msg.to_ws_message_unchecked());
 
-    let (mut sender, mut receiver) = socket.split();
-
     loop {
         tokio::select! {
             item = stream.next() => {
                 match item {
                     Some(Ok(msg)) => {
-                        if sender.send(msg).await.is_err() {
+                        if socket.send(msg).await.is_err() {
                             break;
                         }
                     }
@@ -330,9 +331,12 @@ async fn handle_workspaces_ws(
                     None => break,
                 }
             }
-            msg = receiver.next() => {
-                if msg.is_none() {
-                    break;
+            msg = socket.recv() => {
+                match msg {
+                    Ok(Some(Message::Close(_))) => break,
+                    Ok(Some(_)) => {}
+                    Ok(None) => break,
+                    Err(_) => break,
                 }
             }
         }

@@ -6,6 +6,8 @@ use db::DBService;
 use deployment::{Deployment, DeploymentError, RemoteClientNotConfigured};
 use executors::profile::ExecutorConfigs;
 use git::GitService;
+use relay_control::{RelayControl, signing::RelaySigningService};
+use server_info::ServerInfo;
 use services::services::{
     analytics::{AnalyticsConfig, AnalyticsContext, AnalyticsService, generate_user_id},
     approvals::Approvals,
@@ -24,8 +26,9 @@ use services::services::{
     worktree_manager::WorktreeManager,
 };
 use tokio::sync::RwLock;
+use trusted_key_auth::runtime::TrustedKeyAuthRuntime;
 use utils::{
-    assets::{config_path, credentials_path},
+    assets::{config_path, credentials_path, server_signing_key_path, trusted_keys_path},
     msg_store::MsgStore,
 };
 use uuid::Uuid;
@@ -55,6 +58,10 @@ pub struct LocalDeployment {
     shared_api_base: Option<String>,
     auth_context: AuthContext,
     oauth_handoffs: Arc<RwLock<HashMap<Uuid, PendingHandoff>>>,
+    trusted_key_auth: TrustedKeyAuthRuntime,
+    relay_signing: RelaySigningService,
+    relay_control: Arc<RelayControl>,
+    server_info: Arc<ServerInfo>,
     pty: PtyService,
 }
 
@@ -167,6 +174,11 @@ impl Deployment for LocalDeployment {
         };
 
         let oauth_handoffs = Arc::new(RwLock::new(HashMap::new()));
+        let trusted_key_auth = TrustedKeyAuthRuntime::new(trusted_keys_path());
+        let relay_signing = RelaySigningService::load_or_generate(&server_signing_key_path())
+            .expect("Failed to load or generate server signing key");
+        let relay_control = Arc::new(RelayControl::new());
+        let server_info = Arc::new(ServerInfo::new());
 
         // We need to make analytics accessible to the ContainerService
         // TODO: Handle this more gracefully
@@ -221,6 +233,10 @@ impl Deployment for LocalDeployment {
             shared_api_base: api_base,
             auth_context,
             oauth_handoffs,
+            trusted_key_auth,
+            relay_signing,
+            relay_control,
+            server_info,
             pty,
         };
 
@@ -281,6 +297,22 @@ impl Deployment for LocalDeployment {
 
     fn auth_context(&self) -> &AuthContext {
         &self.auth_context
+    }
+
+    fn relay_control(&self) -> &Arc<RelayControl> {
+        &self.relay_control
+    }
+
+    fn relay_signing(&self) -> &RelaySigningService {
+        &self.relay_signing
+    }
+
+    fn server_info(&self) -> &Arc<ServerInfo> {
+        &self.server_info
+    }
+
+    fn trusted_key_auth(&self) -> &TrustedKeyAuthRuntime {
+        &self.trusted_key_auth
     }
 
     fn shared_api_base(&self) -> Option<String> {

@@ -91,11 +91,15 @@ import {
   Project,
   CreateAndStartWorkspaceRequest,
   CreateAndStartWorkspaceResponse,
+  RelayPairedClient,
+  ListRelayPairedClientsResponse,
+  RemoveRelayPairedClientResponse,
 } from 'shared/types';
 import type { Project as RemoteProject } from 'shared/remote-types';
 import type { WorkspaceWithSession } from '@/shared/types/attempt';
 import { createWorkspaceWithSession } from '@/shared/types/attempt';
 import { makeRequest as makeRemoteRequest } from '@/shared/lib/remoteApi';
+import { makeLocalApiRequest } from '@/shared/lib/localApiTransport';
 
 export class ApiError<E = unknown> extends Error {
   public status?: number;
@@ -120,7 +124,7 @@ const makeRequest = async (url: string, options: RequestInit = {}) => {
     headers.set('Content-Type', 'application/json');
   }
 
-  return fetch(url, {
+  return makeLocalApiRequest(url, {
     ...options,
     headers,
   });
@@ -973,7 +977,7 @@ export const imagesApi = {
     const formData = new FormData();
     formData.append('image', file);
 
-    const response = await fetch('/api/images/upload', {
+    const response = await makeLocalApiRequest('/api/images/upload', {
       method: 'POST',
       body: formData,
       credentials: 'include',
@@ -995,11 +999,14 @@ export const imagesApi = {
     const formData = new FormData();
     formData.append('image', file);
 
-    const response = await fetch(`/api/images/task/${taskId}/upload`, {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
-    });
+    const response = await makeLocalApiRequest(
+      `/api/images/task/${taskId}/upload`,
+      {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1024,7 +1031,7 @@ export const imagesApi = {
     const formData = new FormData();
     formData.append('image', file);
 
-    const response = await fetch(
+    const response = await makeLocalApiRequest(
       `/api/task-attempts/${attemptId}/images/upload`,
       {
         method: 'POST',
@@ -1443,6 +1450,35 @@ export const migrationApi = {
       body: JSON.stringify(data),
     });
     return handleApiResponse<MigrationResponse>(response);
+  },
+};
+
+// Relay API
+export const relayApi = {
+  getEnrollmentCode: async (): Promise<{ enrollment_code: string }> => {
+    const response = await makeRequest('/api/relay-auth/enrollment-code', {
+      method: 'POST',
+    });
+    return handleApiResponse<{ enrollment_code: string }>(response);
+  },
+
+  listPairedClients: async (): Promise<RelayPairedClient[]> => {
+    const response = await makeRequest('/api/relay-auth/clients');
+    const body =
+      await handleApiResponse<ListRelayPairedClientsResponse>(response);
+    return body.clients;
+  },
+
+  removePairedClient: async (
+    clientId: string
+  ): Promise<RemoveRelayPairedClientResponse> => {
+    const response = await makeRequest(
+      `/api/relay-auth/clients/${encodeURIComponent(clientId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    return handleApiResponse<RemoveRelayPairedClientResponse>(response);
   },
 };
 
