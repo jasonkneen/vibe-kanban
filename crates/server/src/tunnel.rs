@@ -6,12 +6,27 @@
 use anyhow::Context as _;
 use deployment::Deployment as _;
 use relay_tunnel::client::{RelayClientConfig, start_relay_client};
-use services::services::remote_client::RemoteClient;
+use services::services::{config::Config, remote_client::RemoteClient};
 
 use crate::DeploymentImpl;
 
 const RELAY_RECONNECT_INITIAL_DELAY_SECS: u64 = 1;
 const RELAY_RECONNECT_MAX_DELAY_SECS: u64 = 30;
+
+pub fn default_relay_host_name(user_id: &str) -> String {
+    let os_type = os_info::get().os_type().to_string();
+    format!("{os_type} host ({user_id})")
+}
+
+pub fn effective_relay_host_name(config: &Config, user_id: &str) -> String {
+    config
+        .relay_host_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| default_relay_host_name(user_id))
+}
 
 fn relay_api_base() -> Option<String> {
     std::env::var("VK_SHARED_RELAY_API_BASE")
@@ -23,6 +38,7 @@ struct RelayParams {
     local_port: u16,
     remote_client: RemoteClient,
     relay_base: String,
+    machine_id: String,
     host_name: String,
 }
 
@@ -66,6 +82,7 @@ async fn resolve_relay_params(deployment: &DeploymentImpl) -> Option<RelayParams
         local_port,
         remote_client,
         relay_base,
+        machine_id: deployment.user_id().to_string(),
         host_name,
     })
 }
@@ -120,6 +137,7 @@ async fn start_relay(
     let base_url = params.relay_base.trim_end_matches('/');
 
     let encoded_name = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("machine_id", &params.machine_id)
         .append_pair("name", &params.host_name)
         .append_pair("agent_version", env!("CARGO_PKG_VERSION"))
         .finish();
