@@ -28,6 +28,7 @@ import {
 } from '@/shared/stores/useDiffViewStore';
 import { useReview, type ReviewDraft } from '@/shared/hooks/useReview';
 import { useWorkspaceContext } from '@/shared/hooks/useWorkspaceContext';
+import { isRealMobileDevice } from '@/shared/hooks/useIsMobile';
 import { getFileIcon } from '@/shared/lib/fileTypeIcon';
 import { OpenInIdeButton } from '@/shared/components/OpenInIdeButton';
 import { useOpenInEditor } from '@/shared/hooks/useOpenInEditor';
@@ -466,7 +467,7 @@ export function PierreDiffCard({
       <div
         className={cn(
           'w-full flex items-center bg-primary px-base gap-base sticky top-0 z-10 border-b border-transparent',
-          'cursor-pointer',
+          'cursor-pointer min-h-10',
           expanded && 'rounded-t-sm'
         )}
         onClick={onToggle}
@@ -524,12 +525,14 @@ export function PierreDiffCard({
           </span>
         )}
         <div className="flex items-center gap-half shrink-0">
-          <span onClick={(e) => e.stopPropagation()}>
-            <OpenInIdeButton
-              onClick={handleOpenInIde}
-              className="size-icon-xs p-0"
-            />
-          </span>
+          {!isRealMobileDevice() && (
+            <span onClick={(e) => e.stopPropagation()}>
+              <OpenInIdeButton
+                onClick={handleOpenInIde}
+                className="size-icon-xs p-0"
+              />
+            </span>
+          )}
           <CaretDownIcon
             className={cn(
               'size-icon-xs text-low transition-transform',

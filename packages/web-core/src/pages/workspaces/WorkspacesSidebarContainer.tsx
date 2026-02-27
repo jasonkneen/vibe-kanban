@@ -9,6 +9,7 @@ import { ScratchType, type DraftWorkspaceData } from 'shared/types';
 import type { Project } from 'shared/remote-types';
 import { splitMessageToTitleDescription } from '@/shared/lib/string';
 import { cn } from '@/shared/lib/utils';
+import { useIsMobile } from '@/shared/hooks/useIsMobile';
 import {
   PERSIST_KEYS,
   usePersistedExpanded,
@@ -259,6 +260,8 @@ export function WorkspacesSidebarContainer({
     navigateToCreate,
   } = useWorkspaceContext();
 
+  const isMobile = useIsMobile();
+  const setMobileActiveTab = useUiPreferencesStore((s) => s.setMobileActiveTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [showArchive, setShowArchive] = usePersistedExpanded(
     PERSIST_KEYS.workspacesSidebarArchived,
@@ -567,9 +570,25 @@ export function WorkspacesSidebarContainer({
       } else {
         selectWorkspace(id);
       }
+      if (isMobile) {
+        setMobileActiveTab('chat');
+      }
     },
-    [selectedWorkspaceId, selectWorkspace, onScrollToBottom]
+    [
+      selectedWorkspaceId,
+      selectWorkspace,
+      onScrollToBottom,
+      isMobile,
+      setMobileActiveTab,
+    ]
   );
+
+  const handleAddWorkspace = useCallback(() => {
+    navigateToCreate();
+    if (isMobile) {
+      setMobileActiveTab('chat');
+    }
+  }, [navigateToCreate, isMobile, setMobileActiveTab]);
 
   const handleOpenWorkspaceActions = useCallback((workspaceId: string) => {
     CommandBarDialog.show({
@@ -646,7 +665,7 @@ export function WorkspacesSidebarContainer({
       onSelectWorkspace={handleSelectWorkspace}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
-      onAddWorkspace={navigateToCreate}
+      onAddWorkspace={handleAddWorkspace}
       isCreateMode={isCreateMode}
       draftTitle={persistedDraftTitle}
       onSelectCreate={navigateToCreate}
