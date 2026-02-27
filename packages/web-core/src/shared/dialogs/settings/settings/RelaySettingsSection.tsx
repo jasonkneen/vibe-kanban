@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cloneDeep, isEqual, merge } from 'lodash';
-import { SignInIcon, SpinnerIcon } from '@phosphor-icons/react';
+import {
+  CheckIcon,
+  CopyIcon,
+  SignInIcon,
+  SpinnerIcon,
+} from '@phosphor-icons/react';
 import { OAuthDialog } from '@/shared/dialogs/global/OAuthDialog';
 import { useAppRuntime } from '@/shared/hooks/useAppRuntime';
 import { useUserSystem } from '@/shared/hooks/useUserSystem';
@@ -73,6 +78,7 @@ function LocalRelaySettingsSectionContent() {
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
   const [enrollmentError, setEnrollmentError] = useState<string | null>(null);
   const [removingClientId, setRemovingClientId] = useState<string | null>(null);
+  const [enrollmentCodeCopied, setEnrollmentCodeCopied] = useState(false);
 
   const {
     data: pairedClients = [],
@@ -276,8 +282,32 @@ function LocalRelaySettingsSectionContent() {
                     <label className="text-sm font-medium text-normal">
                       {t('settings.relay.enrollmentCode.label')}
                     </label>
-                    <div className="bg-secondary border border-border rounded-sm px-base py-half font-mono text-lg text-high tracking-widest select-all">
+                    <div className="relative bg-secondary border border-border rounded-sm px-base py-half font-mono text-lg text-high tracking-widest select-all pr-10">
                       {enrollmentCode}
+                      <button
+                        onClick={() => {
+                          void navigator.clipboard.writeText(enrollmentCode);
+                          setEnrollmentCodeCopied(true);
+                          setTimeout(
+                            () => setEnrollmentCodeCopied(false),
+                            2000
+                          );
+                        }}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-low hover:text-normal transition-colors rounded-sm"
+                        aria-label={t(
+                          'settings.relay.enrollmentCode.copy',
+                          'Copy code'
+                        )}
+                      >
+                        {enrollmentCodeCopied ? (
+                          <CheckIcon
+                            className="size-icon-sm text-success"
+                            weight="bold"
+                          />
+                        ) : (
+                          <CopyIcon className="size-icon-sm" weight="bold" />
+                        )}
+                      </button>
                     </div>
                     <p className="text-sm text-low">
                       {t('settings.relay.enrollmentCode.helper')}
