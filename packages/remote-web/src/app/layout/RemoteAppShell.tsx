@@ -206,11 +206,21 @@ export function RemoteAppShell({ children }: RemoteAppShellProps) {
     [navigate],
   );
 
+  const handlePairHostClick = useCallback(() => {
+    void SettingsDialog.show({
+      initialSection: "relay",
+      sections: REMOTE_SETTINGS_SECTIONS,
+    });
+  }, []);
+
   return (
     <div className="flex h-screen bg-primary">
       <AppBar
         projects={projects}
         hosts={relayHosts}
+        hostsLabel="HOSTS"
+        projectsLabel="BOARDS"
+        onPairHostClick={isSignedIn ? handlePairHostClick : undefined}
         activeHostId={activeHostId}
         onCreateProject={handleCreateProject}
         onWorkspacesClick={handleWorkspacesClick}
