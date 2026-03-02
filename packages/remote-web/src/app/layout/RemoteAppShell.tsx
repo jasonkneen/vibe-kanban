@@ -168,17 +168,12 @@ export function RemoteAppShell({ children }: RemoteAppShellProps) {
 
   const handleProjectClick = useCallback(
     (projectId: string) => {
-      if (!preferredHostId) {
-        openRelaySettings();
-        return;
-      }
-
       navigate({
-        to: "/hosts/$hostId/projects/$projectId",
-        params: { hostId: preferredHostId, projectId },
+        to: "/projects/$projectId",
+        params: { projectId },
       });
     },
-    [navigate, openRelaySettings, preferredHostId],
+    [navigate],
   );
 
   const handleCreateProject = useCallback(async () => {
@@ -194,14 +189,9 @@ export function RemoteAppShell({ children }: RemoteAppShellProps) {
 
       if (result.action === "created" && result.project) {
         void projectsQuery.refetch();
-        if (!preferredHostId) {
-          openRelaySettings();
-          return;
-        }
         navigate({
-          to: "/hosts/$hostId/projects/$projectId",
+          to: "/projects/$projectId",
           params: {
-            hostId: preferredHostId,
             projectId: result.project.id,
           },
         });
@@ -209,13 +199,7 @@ export function RemoteAppShell({ children }: RemoteAppShellProps) {
     } catch {
       // Dialog cancelled
     }
-  }, [
-    activeOrganizationId,
-    navigate,
-    openRelaySettings,
-    preferredHostId,
-    projectsQuery,
-  ]);
+  }, [activeOrganizationId, navigate, projectsQuery]);
 
   const handleCreateOrg = useCallback(async () => {
     try {

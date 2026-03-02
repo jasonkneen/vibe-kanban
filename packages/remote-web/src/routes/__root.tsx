@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo } from "react";
 import {
   createRootRoute,
   Outlet,
@@ -16,12 +16,23 @@ import { ExecutionProcessesProvider } from "@/shared/providers/ExecutionProcesse
 import { TerminalProvider } from "@/shared/providers/TerminalProvider";
 import { LogsPanelProvider } from "@/shared/providers/LogsPanelProvider";
 import { ActionsProvider } from "@/shared/providers/ActionsProvider";
+import { useAuth } from "@/shared/hooks/auth/useAuth";
 import { useWorkspaceContext } from "@/shared/hooks/useWorkspaceContext";
 import { AppNavigationProvider } from "@/shared/hooks/useAppNavigation";
 import {
   createRemoteHostAppNavigation,
   remoteFallbackAppNavigation,
+  resolveRemoteDestinationFromPath,
 } from "@remote/app/navigation/AppNavigation";
+import {
+  resolveRelayNavigationHostId,
+  useRelayAppBarHosts,
+} from "@remote/shared/hooks/useRelayAppBarHosts";
+import { setActiveRelayHostId } from "@remote/shared/lib/relay/activeHostContext";
+import {
+  isProjectDestination,
+  isWorkspacesDestination,
+} from "@/shared/lib/routes/appNavigation";
 import NotFoundPage from "../pages/NotFoundPage";
 
 export const Route = createRootRoute({
@@ -59,22 +70,35 @@ function WorkspaceRouteProviders({ children }: { children: ReactNode }) {
 
 function RootLayout() {
   useSystemTheme();
+  const { isSignedIn } = useAuth();
   const location = useLocation();
   const { hostId } = useParams({ strict: false });
-  const resolvedHostId = hostId ?? null;
+  const routeHostId = hostId ?? null;
+  const { hosts: relayHosts } = useRelayAppBarHosts(isSignedIn);
+  const navigationHostId = useMemo(
+    () => resolveRelayNavigationHostId(relayHosts, { routeHostId }),
+    [relayHosts, routeHostId],
+  );
+
+  useEffect(() => {
+    setActiveRelayHostId(navigationHostId);
+  }, [navigationHostId]);
+
   const appNavigation = useMemo(
     () =>
-      resolvedHostId
-        ? createRemoteHostAppNavigation(resolvedHostId)
+      navigationHostId
+        ? createRemoteHostAppNavigation(navigationHostId)
         : remoteFallbackAppNavigation,
-    [resolvedHostId],
+    [navigationHostId],
   );
   const isStandaloneRoute =
     location.pathname.startsWith("/account") ||
     location.pathname.startsWith("/login") ||
     location.pathname.startsWith("/upgrade") ||
     location.pathname.startsWith("/invitations");
-  const isHostScopedRoute = resolvedHostId !== null;
+  const destination = resolveRemoteDestinationFromPath(location.pathname);
+  const isWorkspaceProviderRoute =
+    isProjectDestination(destination) || isWorkspacesDestination(destination);
 
   const pageContent = isStandaloneRoute ? (
     <Outlet />
@@ -84,7 +108,7 @@ function RootLayout() {
     </RemoteAppShell>
   );
 
-  const content = isHostScopedRoute ? (
+  const content = isWorkspaceProviderRoute ? (
     <WorkspaceRouteProviders>
       <NiceModalProvider>{pageContent}</NiceModalProvider>
     </WorkspaceRouteProviders>
