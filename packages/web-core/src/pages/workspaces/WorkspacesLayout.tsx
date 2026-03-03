@@ -6,7 +6,6 @@ import { usePageTitle } from '@/shared/hooks/usePageTitle';
 import { useIsMobile } from '@/shared/hooks/useIsMobile';
 import { useMobileActiveTab } from '@/shared/stores/useUiPreferencesStore';
 import { cn } from '@/shared/lib/utils';
-import { ExecutionProcessesProvider } from '@/shared/providers/ExecutionProcessesProvider';
 import { CreateModeProvider } from '@/integrations/CreateModeProvider';
 import { ReviewProvider } from '@/shared/hooks/ReviewProvider';
 import { ChangesViewProvider } from '@/shared/hooks/ChangesViewProvider';
@@ -41,7 +40,6 @@ export function WorkspacesLayout() {
     isLoading,
     isCreateMode,
     selectedSession,
-    selectedSessionId,
     sessions,
     selectSession,
     repos,
@@ -244,12 +242,7 @@ export function WorkspacesLayout() {
           {isCreateMode ? (
             <CreateModeProvider>{mobileContent}</CreateModeProvider>
           ) : (
-            <ExecutionProcessesProvider
-              key={`${selectedWorkspace?.id}-${selectedSessionId}`}
-              sessionId={selectedSessionId}
-            >
-              {mobileContent}
-            </ExecutionProcessesProvider>
+            mobileContent
           )}
         </div>
       </div>
@@ -351,12 +344,7 @@ export function WorkspacesLayout() {
         {isCreateMode ? (
           <CreateModeProvider>{mainContent}</CreateModeProvider>
         ) : (
-          <ExecutionProcessesProvider
-            key={`${selectedWorkspace?.id}-${selectedSessionId}`}
-            sessionId={selectedSessionId}
-          >
-            {mainContent}
-          </ExecutionProcessesProvider>
+          mainContent
         )}
       </div>
     </div>
