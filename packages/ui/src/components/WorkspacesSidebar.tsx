@@ -7,6 +7,7 @@ import {
   StackIcon,
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
+import { cn } from '../lib/cn';
 import { InputField } from './InputField';
 import { WorkspaceSummary } from './WorkspaceSummary';
 import {
@@ -77,6 +78,46 @@ export interface WorkspacesSidebarProps {
   onOpenWorkspaceActions?: (workspaceId: string) => void;
   /** Persist keys for collapsible sections */
   persistKeys?: WorkspacesSidebarPersistKeys;
+}
+
+export interface WorkspacesSidebarReopenTagProps {
+  active?: boolean;
+  onHoverStart?: () => void;
+  onHoverEnd?: () => void;
+  ariaLabel?: string;
+  className?: string;
+}
+
+export function WorkspacesSidebarReopenTag({
+  active = false,
+  onHoverStart,
+  onHoverEnd,
+  ariaLabel,
+  className,
+}: WorkspacesSidebarReopenTagProps) {
+  return (
+    <button
+      type="button"
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+      aria-label={ariaLabel ?? 'Preview workspaces sidebar'}
+      title={ariaLabel ?? 'Preview workspaces sidebar'}
+      className={cn(
+        'group inline-flex h-24 w-4 items-center justify-center rounded-r-md border border-l-0 border-border bg-secondary/95 shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 cursor-e-resize',
+        active ? 'bg-panel text-normal' : 'text-low hover:text-normal',
+        className
+      )}
+    >
+      <span className="grid grid-cols-2 gap-[2px]">
+        <span className="size-dot rounded-full bg-low/70 group-hover:bg-low" />
+        <span className="size-dot rounded-full bg-low/70 group-hover:bg-low" />
+        <span className="size-dot rounded-full bg-low/70 group-hover:bg-low" />
+        <span className="size-dot rounded-full bg-low/70 group-hover:bg-low" />
+        <span className="size-dot rounded-full bg-low/70 group-hover:bg-low" />
+        <span className="size-dot rounded-full bg-low/70 group-hover:bg-low" />
+      </span>
+    </button>
+  );
 }
 
 function WorkspaceList({
