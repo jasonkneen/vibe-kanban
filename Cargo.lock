@@ -1344,6 +1344,7 @@ dependencies = [
  "tracing",
  "trusted-key-auth",
  "utils",
+ "worktree-manager",
 ]
 
 [[package]]
@@ -3261,6 +3262,8 @@ dependencies = [
  "trusted-key-auth",
  "utils",
  "uuid",
+ "workspace-manager",
+ "worktree-manager",
 ]
 
 [[package]]
@@ -5399,6 +5402,8 @@ dependencies = [
  "url",
  "utils",
  "uuid",
+ "workspace-manager",
+ "worktree-manager",
 ]
 
 [[package]]
@@ -5454,6 +5459,7 @@ dependencies = [
  "url",
  "utils",
  "uuid",
+ "worktree-manager",
 ]
 
 [[package]]
@@ -7653,6 +7659,35 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "workspace-manager"
+version = "0.1.23"
+dependencies = [
+ "db",
+ "git",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "utils",
+ "uuid",
+ "worktree-manager",
+]
+
+[[package]]
+name = "worktree-manager"
+version = "0.1.24-main.0"
+dependencies = [
+ "dunce",
+ "git",
+ "git2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "utils",
 ]
 
 [[package]]

@@ -1,12 +1,21 @@
 use std::path::{Path, PathBuf};
 
-use db::models::{repo::Repo, workspace::Workspace as DbWorkspace};
-use sqlx::{Pool, Sqlite};
+use db::{
+    DBService,
+    models::{
+        image::WorkspaceImage,
+        repo::{Repo, RepoError},
+        requests::WorkspaceRepoInput,
+        session::Session,
+        workspace::Workspace as DbWorkspace,
+        workspace_repo::{CreateWorkspaceRepo, RepoWithTargetBranch, WorkspaceRepo},
+    },
+};
+use git::{GitService, GitServiceError};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
-use super::worktree_manager::{WorktreeCleanup, WorktreeError, WorktreeManager};
+use worktree_manager::{WorktreeCleanup, WorktreeError, WorktreeManager};
 
 #[derive(Debug, Clone)]
 pub struct RepoWorkspaceInput {
@@ -26,9 +35,21 @@ impl RepoWorkspaceInput {
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error(transparent)]
+    Database(#[from] sqlx::Error),
+    #[error(transparent)]
+    Repo(#[from] RepoError),
+    #[error(transparent)]
     Worktree(#[from] WorktreeError),
+    #[error(transparent)]
+    GitService(#[from] GitServiceError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Workspace not found")]
+    WorkspaceNotFound,
+    #[error("Repository already attached to workspace")]
+    RepoAlreadyAttached,
+    #[error("Branch '{branch}' does not exist in repository '{repo_name}'")]
+    BranchNotFound { repo_name: String, branch: String },
     #[error("No repositories provided")]
     NoRepositories,
     #[error("Partial workspace creation failed: {0}")]
@@ -51,9 +72,265 @@ pub struct WorktreeContainer {
     pub worktrees: Vec<RepoWorktree>,
 }
 
-pub struct WorkspaceManager;
+#[derive(Debug, Clone)]
+pub struct WorkspaceDeletionContext {
+    pub workspace_id: Uuid,
+    pub branch_name: String,
+    pub workspace_dir: Option<PathBuf>,
+    pub repositories: Vec<Repo>,
+    pub repo_paths: Vec<PathBuf>,
+    pub session_ids: Vec<Uuid>,
+}
+
+#[derive(Clone)]
+pub struct ManagedWorkspace {
+    pub workspace: DbWorkspace,
+    pub repos: Vec<RepoWithTargetBranch>,
+    db: DBService,
+}
+
+impl ManagedWorkspace {
+    fn new(db: DBService, workspace: DbWorkspace, repos: Vec<RepoWithTargetBranch>) -> Self {
+        Self {
+            workspace,
+            repos,
+            db,
+        }
+    }
+
+    async fn attach_repository(&self, repo: &WorkspaceRepoInput) -> Result<(), sqlx::Error> {
+        let create_repo = CreateWorkspaceRepo {
+            repo_id: repo.repo_id,
+            target_branch: repo.target_branch.clone(),
+        };
+
+        WorkspaceRepo::create_many(
+            &self.db.pool,
+            self.workspace.id,
+            std::slice::from_ref(&create_repo),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn sync_agent_working_dir(&self) -> Result<(), sqlx::Error> {
+        let repo_count = WorkspaceRepo::find_by_workspace_id(&self.db.pool, self.workspace.id)
+            .await?
+            .len();
+
+        if repo_count > 1 {
+            sqlx::query(
+                "UPDATE workspaces SET agent_working_dir = NULL, updated_at = datetime('now') WHERE id = ?",
+            )
+            .bind(self.workspace.id)
+            .execute(&self.db.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn refresh(&mut self) -> Result<(), WorkspaceError> {
+        self.workspace = DbWorkspace::find_by_id(&self.db.pool, self.workspace.id)
+            .await?
+            .ok_or(WorkspaceError::WorkspaceNotFound)?;
+        self.repos = WorkspaceRepo::find_repos_with_target_branch_for_workspace(
+            &self.db.pool,
+            self.workspace.id,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn add_repository(
+        &mut self,
+        repo_ref: &WorkspaceRepoInput,
+        git: &GitService,
+    ) -> Result<(), WorkspaceError> {
+        let repo = Repo::find_by_id(&self.db.pool, repo_ref.repo_id)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+
+        if !git.check_branch_exists(&repo.path, &repo_ref.target_branch)? {
+            return Err(WorkspaceError::BranchNotFound {
+                repo_name: repo.name,
+                branch: repo_ref.target_branch.clone(),
+            });
+        }
+
+        if WorkspaceRepo::find_by_workspace_and_repo_id(
+            &self.db.pool,
+            self.workspace.id,
+            repo_ref.repo_id,
+        )
+        .await?
+        .is_some()
+        {
+            return Err(WorkspaceError::RepoAlreadyAttached);
+        }
+
+        self.attach_repository(repo_ref).await?;
+        self.sync_agent_working_dir().await?;
+        self.refresh().await?;
+        Ok(())
+    }
+
+    pub async fn associate_images(&self, image_ids: &[Uuid]) -> Result<(), sqlx::Error> {
+        if image_ids.is_empty() {
+            return Ok(());
+        }
+
+        WorkspaceImage::associate_many_dedup(&self.db.pool, self.workspace.id, image_ids).await
+    }
+
+    pub async fn prepare_deletion_context(&self) -> Result<WorkspaceDeletionContext, sqlx::Error> {
+        let repositories =
+            WorkspaceRepo::find_repos_for_workspace(&self.db.pool, self.workspace.id).await?;
+        let session_ids = Session::find_by_workspace_id(&self.db.pool, self.workspace.id)
+            .await?
+            .into_iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        let repo_paths = repositories
+            .iter()
+            .map(|repo| repo.path.clone())
+            .collect::<Vec<_>>();
+
+        Ok(WorkspaceDeletionContext {
+            workspace_id: self.workspace.id,
+            branch_name: self.workspace.branch.clone(),
+            workspace_dir: self.workspace.container_ref.clone().map(PathBuf::from),
+            repositories,
+            repo_paths,
+            session_ids,
+        })
+    }
+
+    pub async fn delete_record(&self) -> Result<u64, sqlx::Error> {
+        DbWorkspace::delete(&self.db.pool, self.workspace.id).await
+    }
+}
+
+#[derive(Clone)]
+pub struct WorkspaceManager {
+    db: DBService,
+}
 
 impl WorkspaceManager {
+    pub fn new(db: DBService) -> Self {
+        Self { db }
+    }
+
+    pub async fn load_managed_workspace(
+        &self,
+        workspace: DbWorkspace,
+    ) -> Result<ManagedWorkspace, sqlx::Error> {
+        let repos =
+            WorkspaceRepo::find_repos_with_target_branch_for_workspace(&self.db.pool, workspace.id)
+                .await?;
+        Ok(ManagedWorkspace::new(self.db.clone(), workspace, repos))
+    }
+
+    /// Resolve the agent working directory for a workspace.
+    /// For single-repo workspaces, this is `{repo_name}/{default_working_dir?}`.
+    /// For multi-repo workspaces, this is `None`.
+    pub async fn resolve_agent_working_dir(
+        &self,
+        repos: &[WorkspaceRepoInput],
+    ) -> Result<Option<String>, RepoError> {
+        let Some(repo_ref) = repos.first() else {
+            return Ok(None);
+        };
+
+        if repos.len() > 1 {
+            return Ok(None);
+        }
+
+        let repo = Repo::find_by_id(&self.db.pool, repo_ref.repo_id)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+
+        let path = match repo.default_working_dir {
+            Some(subdir) => PathBuf::from(&repo.name).join(subdir),
+            None => PathBuf::from(&repo.name),
+        };
+
+        Ok(Some(path.to_string_lossy().to_string()))
+    }
+
+    pub fn spawn_workspace_deletion_cleanup(
+        context: WorkspaceDeletionContext,
+        delete_branches: bool,
+    ) {
+        tokio::spawn(async move {
+            let WorkspaceDeletionContext {
+                workspace_id,
+                branch_name,
+                workspace_dir,
+                repositories,
+                repo_paths,
+                session_ids,
+            } = context;
+
+            for session_id in session_ids {
+                if let Err(e) = Self::remove_session_process_logs(session_id).await {
+                    warn!(
+                        "Failed to remove filesystem process logs for session {}: {}",
+                        session_id, e
+                    );
+                }
+            }
+
+            if let Some(workspace_dir) = workspace_dir {
+                info!(
+                    "Starting background cleanup for workspace {} at {}",
+                    workspace_id,
+                    workspace_dir.display()
+                );
+
+                if let Err(e) = Self::cleanup_workspace(&workspace_dir, &repositories).await {
+                    error!(
+                        "Background workspace cleanup failed for {} at {}: {}",
+                        workspace_id,
+                        workspace_dir.display(),
+                        e
+                    );
+                } else {
+                    info!(
+                        "Background cleanup completed for workspace {}",
+                        workspace_id
+                    );
+                }
+            }
+
+            if delete_branches {
+                let git_service = GitService::new();
+                for repo_path in repo_paths {
+                    match git_service.delete_branch(&repo_path, &branch_name) {
+                        Ok(()) => {
+                            info!("Deleted branch '{}' from repo {:?}", branch_name, repo_path);
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Failed to delete branch '{}' from repo {:?}: {}",
+                                branch_name, repo_path, e
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    async fn remove_session_process_logs(session_id: Uuid) -> Result<(), std::io::Error> {
+        let dir = utils::execution_logs::process_logs_session_dir(session_id);
+        match tokio::fs::remove_dir_all(&dir).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Create a workspace with worktrees for all repositories.
     /// On failure, rolls back any already-created worktrees.
     pub async fn create_workspace(
@@ -140,7 +417,7 @@ impl WorkspaceManager {
     /// Ensure all worktrees in a workspace exist (for cold restart scenarios)
     pub async fn ensure_workspace_exists(
         workspace_dir: &Path,
-        repos: &[Repo],
+        repos: &[RepoWorkspaceInput],
         branch_name: &str,
     ) -> Result<(), WorkspaceError> {
         if repos.is_empty() {
@@ -149,7 +426,7 @@ impl WorkspaceManager {
 
         // Try legacy migration first (single repo projects only)
         // Old layout had worktree directly at workspace_dir; new layout has it at workspace_dir/{repo_name}
-        if repos.len() == 1 && Self::migrate_legacy_worktree(workspace_dir, &repos[0]).await? {
+        if repos.len() == 1 && Self::migrate_legacy_worktree(workspace_dir, &repos[0].repo).await? {
             return Ok(());
         }
 
@@ -157,7 +434,10 @@ impl WorkspaceManager {
             tokio::fs::create_dir_all(workspace_dir).await?;
         }
 
-        for repo in repos {
+        let git = GitService::new();
+
+        for input in repos {
+            let repo = &input.repo;
             let worktree_path = workspace_dir.join(&repo.name);
 
             debug!(
@@ -166,8 +446,23 @@ impl WorkspaceManager {
                 worktree_path.display()
             );
 
-            WorktreeManager::ensure_worktree_exists(&repo.path, branch_name, &worktree_path)
+            if git.check_branch_exists(&repo.path, branch_name)? {
+                WorktreeManager::ensure_worktree_exists(&repo.path, branch_name, &worktree_path)
+                    .await?;
+            } else {
+                info!(
+                    "Workspace branch '{}' missing in repo '{}'; creating from target branch '{}'",
+                    branch_name, repo.name, input.target_branch
+                );
+                WorktreeManager::create_worktree(
+                    &repo.path,
+                    branch_name,
+                    &worktree_path,
+                    &input.target_branch,
+                    true,
+                )
                 .await?;
+            }
         }
 
         Ok(())
@@ -284,7 +579,7 @@ impl WorkspaceManager {
         }
     }
 
-    pub async fn cleanup_orphan_workspaces(db: &Pool<Sqlite>) {
+    pub async fn cleanup_orphan_workspaces(&self) {
         if std::env::var("DISABLE_WORKTREE_CLEANUP").is_ok() {
             info!(
                 "Orphan workspace cleanup is disabled via DISABLE_WORKTREE_CLEANUP environment variable"
@@ -294,16 +589,16 @@ impl WorkspaceManager {
 
         // Always clean up the default directory
         let default_dir = WorktreeManager::get_default_worktree_base_dir();
-        Self::cleanup_orphans_in_directory(db, &default_dir).await;
+        self.cleanup_orphans_in_directory(&default_dir).await;
 
         // Also clean up custom directory if it's different from the default
         let current_dir = Self::get_workspace_base_dir();
         if current_dir != default_dir {
-            Self::cleanup_orphans_in_directory(db, &current_dir).await;
+            self.cleanup_orphans_in_directory(&current_dir).await;
         }
     }
 
-    async fn cleanup_orphans_in_directory(db: &Pool<Sqlite>, workspace_base_dir: &Path) {
+    async fn cleanup_orphans_in_directory(&self, workspace_base_dir: &Path) {
         if !workspace_base_dir.exists() {
             debug!(
                 "Workspace base directory {} does not exist, skipping orphan cleanup",
@@ -339,7 +634,9 @@ impl WorkspaceManager {
             }
 
             let workspace_path_str = path.to_string_lossy().to_string();
-            if let Ok(false) = DbWorkspace::container_ref_exists(db, &workspace_path_str).await {
+            if let Ok(false) =
+                DbWorkspace::container_ref_exists(&self.db.pool, &workspace_path_str).await
+            {
                 info!("Found orphaned workspace: {}", workspace_path_str);
                 if let Err(e) = Self::cleanup_workspace_without_repos(&path).await {
                     error!(

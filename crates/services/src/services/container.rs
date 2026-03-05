@@ -55,11 +55,9 @@ use utils::{
     text::{git_branch_id, short_uuid},
 };
 use uuid::Uuid;
+use worktree_manager::WorktreeError;
 
-use crate::services::{
-    execution_process, notification::NotificationService,
-    workspace_manager::WorkspaceError as WorkspaceManagerError, worktree_manager::WorktreeError,
-};
+use crate::services::{execution_process, notification::NotificationService};
 pub type ContainerRef = String;
 
 #[derive(Debug, Error)]
@@ -74,8 +72,6 @@ pub enum ContainerError {
     Worktree(#[from] WorktreeError),
     #[error(transparent)]
     Workspace(#[from] WorkspaceError),
-    #[error(transparent)]
-    WorkspaceManager(#[from] WorkspaceManagerError),
     #[error(transparent)]
     Session(#[from] SessionError),
     #[error(transparent)]
