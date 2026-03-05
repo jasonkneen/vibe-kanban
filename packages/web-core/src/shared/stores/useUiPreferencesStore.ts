@@ -342,6 +342,10 @@ type State = {
   // Mobile font scale
   mobileFontScale: MobileFontScale;
 
+  // Last selected organization and project (persisted via scratch store)
+  selectedOrgId: string | null;
+  selectedProjectId: string | null;
+
   // UI preferences actions
   setRepoAction: (repoId: string, action: RepoAction) => void;
   setExpanded: (key: string, value: boolean) => void;
@@ -420,6 +424,11 @@ type State = {
 
   // Mobile font scale actions
   setMobileFontScale: (scale: MobileFontScale) => void;
+
+  // Last selected organization and project actions
+  setSelectedOrgId: (orgId: string | null) => void;
+  clearSelectedOrgId: () => void;
+  setSelectedProjectId: (projectId: string | null) => void;
 };
 
 export const useUiPreferencesStore = create<State>()((set, get) => ({
@@ -459,6 +468,10 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
 
   // Mobile font scale
   mobileFontScale: loadMobileFontScale(),
+
+  // Last selected organization and project
+  selectedOrgId: null,
+  selectedProjectId: null,
 
   // UI preferences actions
   setRepoAction: (repoId, action) =>
@@ -783,6 +796,11 @@ export const useUiPreferencesStore = create<State>()((set, get) => ({
     }
     set({ mobileFontScale: scale });
   },
+
+  // Last selected organization and project actions
+  setSelectedOrgId: (orgId) => set({ selectedOrgId: orgId }),
+  clearSelectedOrgId: () => set({ selectedOrgId: null }),
+  setSelectedProjectId: (projectId) => set({ selectedProjectId: projectId }),
 }));
 
 // Hook for repo action preference
