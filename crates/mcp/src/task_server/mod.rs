@@ -1,17 +1,12 @@
 mod handler;
 mod tools;
 
-use db::models::{requests::ContainerQuery, workspace::WorkspaceContext};
+use db::models::{requests::ContainerQuery, session::Session, workspace::WorkspaceContext};
 use rmcp::{handler::server::tool::ToolRouter, schemars};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
-struct ApiResponseEnvelope<T> {
-    success: bool,
-    data: Option<T>,
-    message: Option<String>,
-}
+pub(crate) use crate::ApiResponseEnvelope;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct McpRepoContext {
@@ -31,6 +26,8 @@ pub struct McpContext {
     pub project_id: Option<Uuid>,
     #[schemars(description = "The remote issue ID (if workspace is linked to a remote issue)")]
     pub issue_id: Option<Uuid>,
+    #[schemars(description = "The attached session ID when running in orchestrator mode")]
+    pub session_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub workspace_branch: String,
     #[schemars(
@@ -40,14 +37,44 @@ pub struct McpContext {
 }
 
 #[derive(Debug, Clone)]
-pub struct TaskServer {
-    client: reqwest::Client,
-    base_url: String,
-    tool_router: ToolRouter<TaskServer>,
-    context: Option<McpContext>,
+pub enum McpMode {
+    Global,
+    Orchestrator,
 }
 
-impl TaskServer {
+#[derive(Debug, Clone)]
+pub struct McpServer {
+    client: reqwest::Client,
+    base_url: String,
+    tool_router: ToolRouter<McpServer>,
+    context: Option<McpContext>,
+    mode: McpMode,
+    orchestrator_session: Option<Session>,
+}
+
+impl McpServer {
+    pub fn new_global(base_url: &str) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: base_url.to_string(),
+            tool_router: Self::global_mode_router(),
+            context: None,
+            mode: McpMode::Global,
+            orchestrator_session: None,
+        }
+    }
+
+    pub fn new_orchestrator(base_url: &str, session: Session) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: base_url.to_string(),
+            tool_router: Self::orchestrator_mode_router(),
+            context: None,
+            mode: McpMode::Orchestrator,
+            orchestrator_session: Some(session),
+        }
+    }
+
     fn url(&self, path: &str) -> String {
         format!(
             "{}/{}",
@@ -60,6 +87,13 @@ impl TaskServer {
         let context = self.fetch_context_at_startup().await;
 
         if context.is_none() {
+            if let Some(orchestrator_session) = &self.orchestrator_session {
+                tracing::warn!(
+                    session_id = %orchestrator_session.id,
+                    workspace_id = %orchestrator_session.workspace_id,
+                    "VK orchestrator context unavailable at startup; get_context will not be registered"
+                );
+            }
             self.tool_router.map.remove("get_context");
             tracing::debug!("VK context not available, get_context tool will not be registered");
         } else {
@@ -68,6 +102,10 @@ impl TaskServer {
 
         self.context = context;
         self
+    }
+
+    pub fn mode(&self) -> &McpMode {
+        &self.mode
     }
 
     async fn fetch_context_at_startup(&self) -> Option<McpContext> {
@@ -113,6 +151,19 @@ impl TaskServer {
         let workspace_id = ctx.workspace.id;
         let workspace_branch = ctx.workspace.branch.clone();
 
+        let session_id = self.orchestrator_session.as_ref().map(|session| session.id);
+
+        if let Some(orchestrator_session) = &self.orchestrator_session
+            && orchestrator_session.workspace_id != workspace_id
+        {
+            tracing::warn!(
+                configured_workspace_id = %orchestrator_session.workspace_id,
+                discovered_workspace_id = %workspace_id,
+                "VK orchestrator context workspace mismatch; disabling get_context"
+            );
+            return None;
+        }
+
         // Look up remote workspace to get remote project_id, issue_id, and organization_id
         let (project_id, issue_id, organization_id) = self
             .fetch_remote_workspace_context(workspace_id)
@@ -123,6 +174,7 @@ impl TaskServer {
             organization_id,
             project_id,
             issue_id,
+            session_id,
             workspace_id,
             workspace_branch,
             workspace_repos,
