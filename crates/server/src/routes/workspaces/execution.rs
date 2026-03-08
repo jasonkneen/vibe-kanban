@@ -1,4 +1,4 @@
-use axum::{Extension, extract::State, response::Json as ResponseJson};
+use axum::{Extension, Router, extract::State, response::Json as ResponseJson, routing::post};
 use db::models::{
     execution_process::{ExecutionProcess, ExecutionProcessRunReason, ExecutionProcessStatus},
     session::{CreateSession, Session},
@@ -10,12 +10,29 @@ use executors::actions::{
     ExecutorAction, ExecutorActionType,
     script::{ScriptContext, ScriptRequest, ScriptRequestLanguage},
 };
+use serde::{Deserialize, Serialize};
 use services::services::container::ContainerService;
+use ts_rs::TS;
 use utils::response::ApiResponse;
 use uuid::Uuid;
 
-use super::RunScriptError;
 use crate::{DeploymentImpl, error::ApiError};
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(tag = "type", rename_all = "snake_case")]
+pub enum RunScriptError {
+    NoScriptConfigured,
+    ProcessAlreadyRunning,
+}
+
+pub fn router() -> Router<DeploymentImpl> {
+    Router::new()
+        .route("/dev-server/start", post(start_dev_server))
+        .route("/cleanup", post(run_cleanup_script))
+        .route("/archive", post(run_archive_script))
+        .route("/stop", post(stop_workspace_execution))
+}
 
 #[axum::debug_handler]
 pub async fn start_dev_server(
