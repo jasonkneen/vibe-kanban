@@ -51,22 +51,14 @@ impl McpServer {
 }
 
 impl McpServer {
-    fn attached_session_id(&self) -> Option<Uuid> {
+    fn orchestrator_session_id(&self) -> Option<Uuid> {
         self.context
             .as_ref()
-            .and_then(|ctx| ctx.session_id)
-            .or_else(|| self.orchestrator_session.as_ref().map(|session| session.id))
+            .and_then(|ctx| ctx.orchestrator_session_id)
     }
 
     fn scoped_workspace_id(&self) -> Option<Uuid> {
-        self.context
-            .as_ref()
-            .map(|ctx| ctx.workspace_id)
-            .or_else(|| {
-                self.orchestrator_session
-                    .as_ref()
-                    .map(|session| session.workspace_id)
-            })
+        self.context.as_ref().map(|ctx| ctx.workspace_id)
     }
 
     fn success<T: Serialize>(data: &T) -> Result<CallToolResult, ErrorData> {
@@ -380,9 +372,7 @@ impl McpServer {
 mod tests {
     use std::{collections::BTreeSet, sync::Once};
 
-    use db::models::session::Session;
     use rmcp::handler::server::tool::ToolRouter;
-    use serde_json::json;
     use uuid::Uuid;
 
     use super::McpServer;
@@ -431,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn attached_session_id_is_resolved_from_context() {
+    fn orchestrator_session_id_is_resolved_from_context() {
         install_rustls_provider();
         let session_id = Uuid::new_v4();
         let workspace_id = Uuid::new_v4();
@@ -443,7 +433,7 @@ mod tests {
                 organization_id: None,
                 project_id: None,
                 issue_id: None,
-                session_id: Some(session_id),
+                orchestrator_session_id: Some(session_id),
                 workspace_id,
                 workspace_branch: "main".to_string(),
                 workspace_repos: vec![McpRepoContext {
@@ -453,40 +443,43 @@ mod tests {
                 }],
             }),
             mode: McpMode::Global,
-            orchestrator_session: None,
         };
 
-        assert_eq!(server.attached_session_id(), Some(session_id));
+        assert_eq!(server.orchestrator_session_id(), Some(session_id));
         assert_eq!(server.resolve_workspace_id(None).unwrap(), workspace_id);
     }
 
     #[test]
-    fn orchestrator_scope_falls_back_to_attached_session_when_context_is_missing() {
+    fn orchestrator_scope_requires_context_when_missing() {
         install_rustls_provider();
-        let session_id = Uuid::new_v4();
-        let workspace_id = Uuid::new_v4();
         let server = McpServer {
             client: reqwest::Client::new(),
             base_url: "http://127.0.0.1:3000".to_string(),
             tool_router: ToolRouter::default(),
             context: None,
             mode: McpMode::Orchestrator,
-            orchestrator_session: Some(
-                serde_json::from_value::<Session>(json!({
-                    "id": session_id,
-                    "workspace_id": workspace_id,
-                    "executor": "CODEX",
-                    "agent_working_dir": null,
-                    "created_at": "2026-03-07T00:00:00Z",
-                    "updated_at": "2026-03-07T00:00:00Z"
-                }))
-                .expect("session fixture should deserialize"),
-            ),
         };
 
-        assert_eq!(server.attached_session_id(), Some(session_id));
-        assert_eq!(server.resolve_workspace_id(None).unwrap(), workspace_id);
-        assert!(server.scope_allows_workspace(workspace_id).is_ok());
-        assert!(server.scope_allows_workspace(Uuid::new_v4()).is_err());
+        assert_eq!(server.orchestrator_session_id(), None);
+        assert!(server.resolve_workspace_id(None).is_err());
+        assert!(server.scope_allows_workspace(Uuid::new_v4()).is_ok());
+    }
+
+    #[test]
+    fn global_context_omits_orchestrator_session_id_from_serialized_output() {
+        install_rustls_provider();
+        let context = McpContext {
+            organization_id: None,
+            project_id: None,
+            issue_id: None,
+            orchestrator_session_id: None,
+            workspace_id: Uuid::new_v4(),
+            workspace_branch: "main".to_string(),
+            workspace_repos: vec![],
+        };
+
+        let serialized = serde_json::to_value(&context).expect("context should serialize");
+
+        assert!(serialized.get("orchestrator_session_id").is_none());
     }
 }
