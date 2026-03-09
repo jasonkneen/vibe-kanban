@@ -192,7 +192,11 @@ export const Actions = {
           },
           linkedIssue,
         });
-        const draftId = await persistWorkspaceCreateDraft(createState);
+        const draftId = await persistWorkspaceCreateDraft(
+          createState,
+          undefined,
+          ctx.runtime
+        );
         if (!draftId) {
           await ConfirmDialog.show({
             title: 'Error',
@@ -378,7 +382,11 @@ export const Actions = {
           },
           linkedIssue,
         });
-        const draftId = await persistWorkspaceCreateDraft(createState);
+        const draftId = await persistWorkspaceCreateDraft(
+          createState,
+          undefined,
+          ctx.runtime
+        );
         if (!draftId) {
           await ConfirmDialog.show({
             title: 'Error',
