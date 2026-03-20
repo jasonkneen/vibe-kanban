@@ -3183,6 +3183,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
+name = "relay-types"
+version = "0.1.27"
+dependencies = [
+ "chrono",
+ "serde",
+ "sqlx",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
 name = "remote"
 version = "0.1.24"
 dependencies = [
@@ -3213,6 +3224,7 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry_sdk",
  "rand 0.9.2",
+ "relay-types",
  "reqwest 0.12.28",
  "reqwest 0.13.2",
  "rustls",

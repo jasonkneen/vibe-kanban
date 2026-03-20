@@ -7,9 +7,12 @@ use std::{
 use deployment::{Deployment, DeploymentError};
 use services::services::container::ContainerService;
 use tokio_util::sync::CancellationToken;
+use tower_http::validate_request::ValidateRequestHeaderLayer;
 use utils::assets::asset_dir;
 
-use crate::{DeploymentImpl, tunnel};
+use crate::{
+    DeploymentImpl, middleware::origin::validate_origin, routes, runtime::relay_registration,
+};
 
 /// A running server instance. Callers can read the port, then call `serve()`
 /// to run the server until the shutdown token is cancelled.
@@ -38,23 +41,24 @@ impl ServerHandle {
         // Start relay tunnel so the host registers with the relay server.
         // This must happen after the port is known (it's needed for local
         // proxying) and is shared between the standalone binary and Tauri.
-        self.deployment.server_info().set_port(self.port).await;
         self.deployment
-            .server_info()
-            .set_bind_ip(self.main_listener.local_addr()?.ip())
-            .await;
-        let relay_host_name = {
-            let config = self.deployment.config().read().await;
-            tunnel::effective_relay_host_name(&config, self.deployment.user_id())
-        };
+            .client_info()
+            .set_port(self.port)
+            .expect("client port already set");
+        let host = self.main_listener.local_addr()?.ip().to_string();
         self.deployment
-            .server_info()
-            .set_hostname(relay_host_name)
-            .await;
-        tunnel::spawn_relay(&self.deployment).await;
+            .client_info()
+            .set_hostname(host)
+            .expect("client hostname already set");
+        self.deployment
+            .client_info()
+            .set_preview_proxy_port(self.proxy_port)
+            .expect("client preview proxy port already set");
+        relay_registration::spawn_relay(&self.deployment).await;
 
-        let app_router = crate::routes::router(self.deployment.clone());
-        let proxy_router: axum::Router = crate::preview_proxy::router();
+        let app_router = routes::router(self.deployment.clone());
+        let proxy_router: axum::Router = routes::preview::subdomain_router(self.deployment.clone())
+            .layer(ValidateRequestHeaderLayer::custom(validate_origin));
 
         let main_shutdown = self.shutdown_token.clone();
         let proxy_shutdown = self.shutdown_token.clone();
@@ -111,7 +115,6 @@ pub async fn start_with_bind(main_addr: &str, proxy_addr: &str) -> anyhow::Resul
 
     let proxy_listener = tokio::net::TcpListener::bind(proxy_addr).await?;
     let proxy_port = proxy_listener.local_addr()?.port();
-    crate::preview_proxy::set_proxy_port(proxy_port);
 
     tracing::info!("Server on :{port}, Preview proxy on :{proxy_port}");
 

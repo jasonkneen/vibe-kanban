@@ -75,6 +75,7 @@ export interface WorkspaceContextValue {
   activeWorkspaces: SidebarWorkspace[];
   /** Archived workspaces for sidebar display */
   archivedWorkspaces: SidebarWorkspace[];
+  isWorkspacesListLoading: boolean;
   isLoading: boolean;
   isCreateMode: boolean;
   selectWorkspace: (id: string) => void;

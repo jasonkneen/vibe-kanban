@@ -91,6 +91,7 @@ interface WorkspacesMainContainerProps {
   repos: RepoWithTargetBranch[];
   onSelectSession: (sessionId: string) => void;
   isLoading: boolean;
+  isSessionsLoading?: boolean;
   isNewSessionMode: boolean;
   onStartNewSession: () => void;
 }
@@ -107,6 +108,7 @@ export const WorkspacesMainContainer = forwardRef<
     repos,
     onSelectSession,
     isLoading,
+    isSessionsLoading: _isSessionsLoading,
     isNewSessionMode,
     onStartNewSession,
   },
