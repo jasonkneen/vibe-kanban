@@ -68,12 +68,7 @@
     "browserDefault": "ブラウザ設定"
   },
   "states": {
-    "error": "エラー",
-    "loading": "読み込み中...",
-    "loadingHistory": "履歴を読み込み中",
-    "reconnecting": "再接続中",
-    "saving": "保存中...",
-    "success": "成功"
+    "loading": "読み込み中..."
   },
   "orgSwitcher": {
     "organizations": "組織",
@@ -513,6 +508,13 @@
     "agent": "エージェント",
     "default": "デフォルト",
     "model": "モデル"
+  },
+  "crashScreen": {
+    "title": "Something went wrong",
+    "description": "The application encountered an unexpected error.",
+    "reload": "Reload",
+    "showDetails": "Show details",
+    "hideDetails": "Hide details"
   },
   "syncError": {
     "networkErrors": "ネットワークエラー",
