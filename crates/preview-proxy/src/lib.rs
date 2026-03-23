@@ -7,6 +7,8 @@
 //! Host header subdomain. A request to `{port}.localhost:{proxy_port}/path`
 //! is forwarded to `localhost:{port}/path`.
 
+use std::net::SocketAddr;
+
 use axum::{
     body::Body,
     extract::{FromRequestParts, Request, ws::WebSocketUpgrade},
@@ -211,7 +213,7 @@ fn preview_api_target_path(target_port: u16, path: &str, query: &str) -> String 
 }
 
 fn relay_preview_target_url(
-    backend_port: u16,
+    backend_addr: SocketAddr,
     host_id: Uuid,
     target_port: u16,
     normalized_path: &str,
@@ -221,7 +223,7 @@ fn relay_preview_target_url(
     let relay_path = preview_api_target_path(target_port, normalized_path, query_string);
 
     format!(
-        "{scheme}://127.0.0.1:{backend_port}/api/host/{host_id}/{}",
+        "{scheme}://{backend_addr}/api/host/{host_id}/{}",
         relay_path.trim_start_matches("/api/")
     )
 }
@@ -378,7 +380,7 @@ fn extract_target_from_host(headers: &HeaderMap) -> Option<PreviewTarget> {
 
 pub async fn proxy_subdomain_request(
     service: &PreviewProxyService,
-    backend_port: u16,
+    backend_addr: SocketAddr,
     proxy_port: u16,
     request: Request,
 ) -> Response {
@@ -391,12 +393,12 @@ pub async fn proxy_subdomain_request(
 
     let path = normalized_proxy_path(request.uri().path()).to_string();
 
-    proxy_impl(service, backend_port, proxy_port, target, path, request).await
+    proxy_impl(service, backend_addr, proxy_port, target, path, request).await
 }
 
 async fn proxy_impl(
     service: &PreviewProxyService,
-    backend_port: u16,
+    backend_addr: SocketAddr,
     proxy_port: u16,
     target: PreviewTarget,
     path_str: String,
@@ -428,7 +430,7 @@ async fn proxy_impl(
         return ws
             .on_upgrade(move |client_socket| async move {
                 if let Err(e) = handle_ws_proxy(
-                    backend_port,
+                    backend_addr,
                     client_socket,
                     target,
                     path_str,
@@ -444,12 +446,12 @@ async fn proxy_impl(
     }
 
     let request = Request::from_parts(parts, body);
-    http_proxy_handler(service, backend_port, proxy_port, target, path_str, request).await
+    http_proxy_handler(service, backend_addr, proxy_port, target, path_str, request).await
 }
 
 async fn http_proxy_handler(
     service: &PreviewProxyService,
-    backend_port: u16,
+    backend_addr: SocketAddr,
     proxy_port: u16,
     target: PreviewTarget,
     path_str: String,
@@ -475,7 +477,7 @@ async fn http_proxy_handler(
     };
     let target_url = if let Some(host_id) = target.relay_host_id {
         relay_preview_target_url(
-            backend_port,
+            backend_addr,
             host_id,
             target.port,
             normalized_path,
@@ -716,7 +718,7 @@ async fn http_proxy_handler(
 }
 
 async fn handle_ws_proxy(
-    backend_port: u16,
+    backend_addr: SocketAddr,
     client_socket: axum::extract::ws::WebSocket,
     target: PreviewTarget,
     path: String,
@@ -727,7 +729,7 @@ async fn handle_ws_proxy(
     let query = query_string.as_deref().unwrap_or_default();
     let ws_url = if let Some(host_id) = target.relay_host_id {
         relay_preview_target_url(
-            backend_port,
+            backend_addr,
             host_id,
             target.port,
             normalized_path,
