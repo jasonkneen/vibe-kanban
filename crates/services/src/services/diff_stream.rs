@@ -15,7 +15,7 @@ use db::{
 };
 use executors::logs::utils::{ConversationPatch, patch::escape_json_pointer_segment};
 use futures::StreamExt;
-use git::{Commit, DiffTarget, GitService, GitServiceError};
+use git::{Commit, GitService, GitServiceError, compute_line_change_counts};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
     DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
@@ -24,10 +24,7 @@ use sqlx::SqlitePool;
 use thiserror::Error;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::{IntervalStream, ReceiverStream};
-use utils::{
-    diff::{self, Diff},
-    log_msg::LogMsg,
-};
+use utils::{diff::Diff, log_msg::LogMsg};
 use uuid::Uuid;
 
 use crate::services::filesystem_watcher::{self, FilesystemWatcherError};
@@ -75,15 +72,7 @@ pub async fn compute_diff_stats(
         let diffs_result = tokio::task::spawn_blocking({
             let git = git.clone();
             let worktree = worktree_path.clone();
-            move || {
-                git.get_diffs(
-                    DiffTarget::Worktree {
-                        worktree_path: &worktree,
-                        base_commit: &base_commit,
-                    },
-                    None,
-                )
-            }
+            move || git.get_diffs(&worktree, &base_commit, None)
         })
         .await;
 
@@ -117,19 +106,6 @@ pub enum DiffStreamError {
     Io(#[from] io::Error),
     #[error("Notify error: {0}")]
     Notify(#[from] notify::Error),
-}
-
-impl DiffStreamError {
-    /// Returns true if this error is caused by a git repository not being found
-    /// (e.g. the worktree directory was deleted while the diff stream was running).
-    fn is_repo_not_found(&self) -> bool {
-        matches!(
-            self,
-            DiffStreamError::GitService(GitServiceError::Git(git_err))
-                if git_err.code() == git2::ErrorCode::NotFound
-                    && git_err.class() == git2::ErrorClass::Repository
-        )
-    }
 }
 
 /// Diff stream that owns the filesystem watcher task
@@ -210,11 +186,7 @@ pub async fn create(args: DiffStreamArgs) -> Result<DiffStreamHandle, DiffStream
     let watcher_task = tokio::spawn(async move {
         let mut manager = DiffStreamManager::new(manager_args, tx);
         if let Err(e) = manager.run().await {
-            if e.is_repo_not_found() {
-                tracing::warn!("Diff stream ended: repository no longer found");
-            } else {
-                tracing::error!("Diff stream manager failed: {e}");
-            }
+            tracing::warn!("Diff stream ended: {e}");
             let _ = manager.tx.send(Err(io::Error::other(e.to_string()))).await;
         }
     });
@@ -324,13 +296,7 @@ impl DiffStreamManager {
         let cumulative = self.cumulative.clone();
 
         tokio::task::spawn_blocking(move || {
-            let diffs = git.get_diffs(
-                DiffTarget::Worktree {
-                    worktree_path: &worktree,
-                    base_commit: &base,
-                },
-                None,
-            )?;
+            let diffs = git.get_diffs(&worktree, &base, None)?;
 
             let mut processed_diffs = Vec::with_capacity(diffs.len());
             for mut diff in diffs {
@@ -509,7 +475,7 @@ fn omit_diff_contents(diff: &mut Diff) {
     {
         let old = diff.old_content.as_deref().unwrap_or("");
         let new = diff.new_content.as_deref().unwrap_or("");
-        let (add, del) = diff::compute_line_change_counts(old, new);
+        let (add, del) = compute_line_change_counts(old, new);
         diff.additions = Some(add);
         diff.deletions = Some(del);
     }
@@ -552,13 +518,7 @@ fn process_file_changes(
 ) -> Result<Vec<LogMsg>, DiffStreamError> {
     let path_filter: Vec<&str> = changed_paths.iter().map(|s| s.as_str()).collect();
 
-    let current_diffs = git_service.get_diffs(
-        DiffTarget::Worktree {
-            worktree_path,
-            base_commit,
-        },
-        Some(&path_filter),
-    )?;
+    let current_diffs = git_service.get_diffs(worktree_path, base_commit, Some(&path_filter))?;
 
     let mut msgs = Vec::new();
     let mut files_with_diffs = HashSet::new();
@@ -620,7 +580,7 @@ fn setup_git_watcher(
     Debouncer<RecommendedWatcher, RecommendedCache>,
     tokio::sync::watch::Receiver<()>,
 )> {
-    let Ok(repo) = git.open_repo(worktree_path) else {
+    let Ok(gitdir) = git.get_git_dir(worktree_path) else {
         tracing::warn!(
             "Failed to open git repo at {:?}, git events will be ignored",
             worktree_path
@@ -628,8 +588,7 @@ fn setup_git_watcher(
         return None;
     };
 
-    // For worktrees, repo.path() points to the actual gitdir (e.g. .git/worktrees/name or .git/)
-    let gitdir = repo.path();
+    // For worktrees, gitdir points to the actual gitdir (e.g. .git/worktrees/name or .git/)
     let paths_to_watch = vec![gitdir.join("HEAD"), gitdir.join("logs").join("HEAD")];
 
     let (tx, rx) = tokio::sync::watch::channel(());
