@@ -92,6 +92,10 @@
       "linesChanged": "{{count}} 行已更改",
       "loadAnyway": "仍然加载差异",
       "warning": "大型差异可能会降低浏览器速度。"
+    },
+    "markdownPreview": {
+      "showPreview": "显示 Markdown 预览",
+      "showDiff": "显示代码差异"
     }
   },
   "processes": {
