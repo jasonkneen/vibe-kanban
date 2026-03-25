@@ -34,6 +34,8 @@ function VSCodeChatBox({
   onStartNewSession,
   onScrollToPreviousMessage,
   onScrollToBottom,
+  onScrollToUserMessage,
+  getActiveTurnPatchKey,
 }: {
   session: Session | undefined;
   workspaceId: string | undefined;
@@ -43,6 +45,8 @@ function VSCodeChatBox({
   onStartNewSession: () => void;
   onScrollToPreviousMessage: () => void;
   onScrollToBottom: (behavior?: 'auto' | 'smooth') => void;
+  onScrollToUserMessage: (patchKey: string) => void;
+  getActiveTurnPatchKey: () => string | null;
 }) {
   const { diffStats } = useWorkspaceDiffContext();
 
@@ -72,6 +76,8 @@ function VSCodeChatBox({
       showOpenWorkspaceButton={false}
       onScrollToPreviousMessage={onScrollToPreviousMessage}
       onScrollToBottom={onScrollToBottom}
+      onScrollToUserMessage={onScrollToUserMessage}
+      getActiveTurnPatchKey={getActiveTurnPatchKey}
     />
   );
 }
@@ -105,6 +111,14 @@ export function VSCodeWorkspacePage() {
   const handleScrollToPreviousMessage = () => {
     conversationListRef.current?.scrollToPreviousUserMessage();
   };
+
+  const handleScrollToUserMessage = useCallback((patchKey: string) => {
+    conversationListRef.current?.scrollToEntryByPatchKey(patchKey);
+  }, []);
+
+  const handleGetActiveTurnPatchKey = useCallback(() => {
+    return conversationListRef.current?.getVisibleUserMessagePatchKey() ?? null;
+  }, []);
 
   const handleScrollToBottom = useCallback(
     (behavior: 'auto' | 'smooth' = 'smooth') => {
@@ -236,6 +250,8 @@ export function VSCodeWorkspacePage() {
                     onStartNewSession={startNewSession}
                     onScrollToPreviousMessage={handleScrollToPreviousMessage}
                     onScrollToBottom={handleScrollToBottom}
+                    onScrollToUserMessage={handleScrollToUserMessage}
+                    getActiveTurnPatchKey={handleGetActiveTurnPatchKey}
                   />
                 </div>
               </MessageEditProvider>
