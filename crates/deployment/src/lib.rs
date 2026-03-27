@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use axum::response::sse::Event;
 use client_info::ClientInfo;
 use db::{DBService, models::workspace::WorkspaceError};
-use desktop_bridge::tunnel::TunnelManager;
 use executors::executors::ExecutorError;
 use futures::{StreamExt, TryStreamExt};
 use git::{GitService, GitServiceError};
@@ -32,6 +31,7 @@ use services::services::{
 use sqlx::Error as SqlxError;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use trusted_key_auth::runtime::TrustedKeyAuthRuntime;
 use utils::sentry as sentry_utils;
 use worktree_manager::WorktreeError;
@@ -78,7 +78,7 @@ pub enum DeploymentError {
 
 #[async_trait]
 pub trait Deployment: Clone + Send + Sync + 'static {
-    async fn new() -> Result<Self, DeploymentError>;
+    async fn new(shutdown: CancellationToken) -> Result<Self, DeploymentError>;
 
     fn user_id(&self) -> &str;
 
@@ -117,8 +117,6 @@ pub trait Deployment: Clone + Send + Sync + 'static {
     fn remote_info(&self) -> &RemoteInfo;
 
     fn preview_proxy(&self) -> &PreviewProxyService;
-
-    fn tunnel_manager(&self) -> &Arc<TunnelManager>;
 
     fn relay_hosts(&self) -> Result<&Arc<RelayHosts>, RelayHostsNotConfigured> {
         Err(RelayHostsNotConfigured)
