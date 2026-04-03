@@ -801,7 +801,13 @@ impl LocalContainerService {
                 let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
             }
 
-            // Cleanup child handle
+            // SIGKILL any orphaned children (e.g. MCP servers) still in the
+            // process group. The executor itself is already done — either it
+            // exited naturally or was killed in the exit-signal branch above.
+            if let Some(child_lock) = child_store.read().await.get(&exec_id).cloned() {
+                let mut child = child_lock.write().await;
+                let _ = child.start_kill();
+            }
             child_store.write().await.remove(&exec_id);
         })
     }
